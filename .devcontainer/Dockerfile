@@ -30,6 +30,7 @@ RUN apt-get update && apt-get install -y sudo \
 # Desktop tools (RViz2, Gazebo, demos) + common dev tools, colcon, rosdep
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-jazzy-desktop-full \
+    ros-jazzy-moveit \
     build-essential \
     cmake \
     git \
@@ -40,6 +41,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-pip \
     python3-colcon-common-extensions \
     python3-rosdep \
+    python3-vcstool \
     x11-apps \
     && rm -rf /var/lib/apt/lists/*
 
@@ -47,6 +49,7 @@ RUN rosdep update || true
 
 # Source ROS2 setup automatically for interactive shells
 RUN echo "source /opt/ros/jazzy/setup.bash" >> /home/$USERNAME/.bashrc \
+    && echo "[ -f /workspace/underlay_ws/install/setup.bash ] && source /workspace/underlay_ws/install/setup.bash" >> /home/$USERNAME/.bashrc \
     && echo "[ -f /workspace/install/setup.bash ] && source /workspace/install/setup.bash" >> /home/$USERNAME/.bashrc
 
 USER $USERNAME
