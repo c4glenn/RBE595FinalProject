@@ -1,0 +1,13 @@
+# Spice rack layout, shared by models/spice_rack.sdf.xacro and anything that needs slot poses.
+#
+# Rack frame: origin at the centre of the underside of the base plate, +x along the rows' direction
+# of increasing row index, +y along increasing column index. Slot (row, col) centre is
+#   x = (row - (rows - 1) / 2) * pitch
+#   y = (col - (cols - 1) / 2) * pitch
+#   z = plate_thickness            (the floor a bottle stands on)
+rows: 3
+cols: 4
+pitch: 0.10            # slot centre-to-centre distance [m]
+cell: 0.060            # square pocket inner width [m]; a 0.050 m bottle leaves 5 mm each side
+wall_height: 0.04      # pocket depth above the floor [m]; the rest of the bottle stays free to grasp
+plate_thickness: 0.01  # base plate [m]

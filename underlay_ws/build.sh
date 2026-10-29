@@ -4,7 +4,10 @@
 set -euo pipefail
 
 cd "$(dirname "$(readlink -f "$0")")"
+# ROS setup scripts reference unset variables, so relax -u while sourcing.
+set +u
 source "/opt/ros/${ROS_DISTRO:-jazzy}/setup.bash"
+set -u
 
 KORTEX=src/ros2_kortex
 for repos in \

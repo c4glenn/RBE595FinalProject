@@ -1,0 +1,70 @@
+<?xml version="1.0"?>
+<!--
+  Bowl: a round floor with a ring of `segments` straight wall pieces around it, open at the top so
+  the arm can drop bottles into it.
+
+  The model origin is the centre of the floor's underside, so spawning it at the table-top height
+  places it on the table. Spawn with ros_gz_sim `create -string <output of xacro>`; see
+  spawn_bowl() in launch/sim.launch.py.
+
+  Arguments:
+    name      model name (must be unique in the world)
+    radius    outer radius [m]
+    height    outer height including the floor [m]
+    wall      wall and floor thickness [m]
+    segments  number of wall pieces approximating the circle
+-->
+<sdf xmlns:xacro="http://ros.org/wiki/xacro" version="1.9">
+  <xacro:arg name="name" default="bowl" />
+  <xacro:arg name="radius" default="0.09" />
+  <xacro:arg name="height" default="0.06" />
+  <xacro:arg name="wall" default="0.008" />
+  <xacro:arg name="segments" default="24" />
+
+  <xacro:property name="r" value="$(arg radius)" />
+  <xacro:property name="h" value="$(arg height)" />
+  <xacro:property name="t" value="$(arg wall)" />
+  <xacro:property name="n" value="$(arg segments)" />
+  <!-- Wall pieces centred on radius r - t/2, long enough to close the gaps at the outer edge -->
+  <xacro:property name="seg_len" value="${2 * r * tan(pi / n)}" />
+
+  <xacro:macro name="material">
+    <material>
+      <ambient>0.2 0.45 0.7 1</ambient>
+      <diffuse>0.2 0.45 0.7 1</diffuse>
+    </material>
+  </xacro:macro>
+
+  <!-- The i-th wall piece, i = 0..n-1 -->
+  <xacro:macro name="walls" params="i">
+    <xacro:if value="${i &lt; n}">
+      <xacro:property name="a" value="${2 * pi * i / n}" />
+      <collision name="wall_${i}_collision">
+        <pose>${(r - t / 2) * cos(a)} ${(r - t / 2) * sin(a)} ${h / 2} 0 0 ${a}</pose>
+        <geometry><box><size>${t} ${seg_len} ${h}</size></box></geometry>
+      </collision>
+      <visual name="wall_${i}_visual">
+        <pose>${(r - t / 2) * cos(a)} ${(r - t / 2) * sin(a)} ${h / 2} 0 0 ${a}</pose>
+        <geometry><box><size>${t} ${seg_len} ${h}</size></box></geometry>
+        <xacro:material />
+      </visual>
+      <xacro:walls i="${i + 1}" />
+    </xacro:if>
+  </xacro:macro>
+
+  <model name="$(arg name)">
+    <static>true</static>
+    <link name="link">
+      <collision name="floor_collision">
+        <pose>0 0 ${t / 2} 0 0 0</pose>
+        <geometry><cylinder><radius>${r}</radius><length>${t}</length></cylinder></geometry>
+      </collision>
+      <visual name="floor_visual">
+        <pose>0 0 ${t / 2} 0 0 0</pose>
+        <geometry><cylinder><radius>${r}</radius><length>${t}</length></cylinder></geometry>
+        <xacro:material />
+      </visual>
+      <xacro:walls i="0" />
+    </link>
+  </model>
+</sdf>

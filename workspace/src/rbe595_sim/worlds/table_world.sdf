@@ -9,6 +9,9 @@
     <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
     <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
     <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
 
     <light type="directional" name="sun">
       <cast_shadows>true</cast_shadows>
@@ -34,17 +37,17 @@
       </link>
     </model>
 
-    <!-- 1.2 x 0.8 m table, top surface at z = 0.75 m, centred on the world origin -->
+    <!-- 1.2 x 1.5 m table (wide in y so the bowl fits beside the spice rack), top surface at z = 0.75 m, centred on the world origin -->
     <model name="table">
       <static>true</static>
       <link name="link">
         <collision name="top_collision">
           <pose>0 0 0.725 0 0 0</pose>
-          <geometry><box><size>1.2 0.8 0.05</size></box></geometry>
+          <geometry><box><size>1.2 1.5 0.05</size></box></geometry>
         </collision>
         <visual name="top_visual">
           <pose>0 0 0.725 0 0 0</pose>
-          <geometry><box><size>1.2 0.8 0.05</size></box></geometry>
+          <geometry><box><size>1.2 1.5 0.05</size></box></geometry>
           <material>
             <ambient>0.55 0.4 0.25 1</ambient>
             <diffuse>0.55 0.4 0.25 1</diffuse>
@@ -52,11 +55,11 @@
         </visual>
 
         <collision name="leg_fl_collision">
-          <pose>0.55 0.35 0.35 0 0 0</pose>
+          <pose>0.55 0.7 0.35 0 0 0</pose>
           <geometry><box><size>0.05 0.05 0.7</size></box></geometry>
         </collision>
         <visual name="leg_fl_visual">
-          <pose>0.55 0.35 0.35 0 0 0</pose>
+          <pose>0.55 0.7 0.35 0 0 0</pose>
           <geometry><box><size>0.05 0.05 0.7</size></box></geometry>
           <material>
             <ambient>0.3 0.3 0.3 1</ambient>
@@ -65,11 +68,11 @@
         </visual>
 
         <collision name="leg_fr_collision">
-          <pose>0.55 -0.35 0.35 0 0 0</pose>
+          <pose>0.55 -0.7 0.35 0 0 0</pose>
           <geometry><box><size>0.05 0.05 0.7</size></box></geometry>
         </collision>
         <visual name="leg_fr_visual">
-          <pose>0.55 -0.35 0.35 0 0 0</pose>
+          <pose>0.55 -0.7 0.35 0 0 0</pose>
           <geometry><box><size>0.05 0.05 0.7</size></box></geometry>
           <material>
             <ambient>0.3 0.3 0.3 1</ambient>
@@ -78,11 +81,11 @@
         </visual>
 
         <collision name="leg_bl_collision">
-          <pose>-0.55 0.35 0.35 0 0 0</pose>
+          <pose>-0.55 0.7 0.35 0 0 0</pose>
           <geometry><box><size>0.05 0.05 0.7</size></box></geometry>
         </collision>
         <visual name="leg_bl_visual">
-          <pose>-0.55 0.35 0.35 0 0 0</pose>
+          <pose>-0.55 0.7 0.35 0 0 0</pose>
           <geometry><box><size>0.05 0.05 0.7</size></box></geometry>
           <material>
             <ambient>0.3 0.3 0.3 1</ambient>
@@ -91,17 +94,53 @@
         </visual>
 
         <collision name="leg_br_collision">
-          <pose>-0.55 -0.35 0.35 0 0 0</pose>
+          <pose>-0.55 -0.7 0.35 0 0 0</pose>
           <geometry><box><size>0.05 0.05 0.7</size></box></geometry>
         </collision>
         <visual name="leg_br_visual">
-          <pose>-0.55 -0.35 0.35 0 0 0</pose>
+          <pose>-0.55 -0.7 0.35 0 0 0</pose>
           <geometry><box><size>0.05 0.05 0.7</size></box></geometry>
           <material>
             <ambient>0.3 0.3 0.3 1</ambient>
             <diffuse>0.3 0.3 0.3 1</diffuse>
           </material>
         </visual>
+      </link>
+    </model>
+
+    <!--
+      Fixed scene camera beyond the table's +x end, looking back down its length at the arm,
+      spice rack and every position the bowl can be spawned at (see random_bowl_position() in
+      sim.launch.py). Images on gz topic /scene_camera/image (bridged to ROS by sim.launch.py).
+    -->
+    <model name="scene_camera">
+      <static>true</static>
+      <pose>1.2 0 1.7 0 0.492 3.1416</pose>
+      <link name="link">
+        <visual name="visual">
+          <geometry><box><size>0.04 0.08 0.04</size></box></geometry>
+          <material>
+            <ambient>0.1 0.1 0.1 1</ambient>
+            <diffuse>0.1 0.1 0.1 1</diffuse>
+          </material>
+        </visual>
+        <sensor name="camera" type="camera">
+          <topic>scene_camera/image</topic>
+          <update_rate>10</update_rate>
+          <always_on>true</always_on>
+          <camera>
+            <horizontal_fov>1.047</horizontal_fov>
+            <image>
+              <width>1280</width>
+              <height>720</height>
+              <format>R8G8B8</format>
+            </image>
+            <clip>
+              <near>0.05</near>
+              <far>10</far>
+            </clip>
+          </camera>
+        </sensor>
       </link>
     </model>
   </world>

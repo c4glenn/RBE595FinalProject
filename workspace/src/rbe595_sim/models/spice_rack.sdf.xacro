@@ -1,0 +1,71 @@
+<?xml version="1.0"?>
+<!--
+  Spice rack: a flat base plate with an egg-crate lattice of low walls forming rows x cols square
+  pockets (layout in config/spice_rack.yaml). Bottles stand upright in the pockets and are open from
+  above, so the arm can grasp them from the top and drop them in with a few mm of clearance per side.
+
+  Walls are only wall_height tall so most of each bottle stays exposed for the gripper fingers, and
+  the pitch leaves a gap between neighbouring bottles for the open fingers to straddle one bottle.
+
+  Spawn with ros_gz_sim `create -string <output of xacro>`; see launch/sim.launch.py.
+
+  Arguments:
+    name   model name (must be unique in the world)
+-->
+<sdf xmlns:xacro="http://ros.org/wiki/xacro" version="1.9">
+  <xacro:arg name="name" default="spice_rack" />
+
+  <xacro:property name="cfg" value="${xacro.load_yaml('$(find rbe595_sim)/config/spice_rack.yaml')}" />
+  <xacro:property name="rows" value="${cfg['rows']}" />
+  <xacro:property name="cols" value="${cfg['cols']}" />
+  <xacro:property name="pitch" value="${cfg['pitch']}" />
+  <xacro:property name="wall_t" value="${cfg['pitch'] - cfg['cell']}" />
+  <xacro:property name="wall_h" value="${cfg['plate_thickness'] + cfg['wall_height']}" />
+  <xacro:property name="plate_t" value="${cfg['plate_thickness']}" />
+  <!-- outer footprint -->
+  <xacro:property name="len_x" value="${rows * pitch + wall_t}" />
+  <xacro:property name="len_y" value="${cols * pitch + wall_t}" />
+
+  <xacro:macro name="box" params="name x y z sx sy sz r g b">
+    <collision name="${name}_collision">
+      <pose>${x} ${y} ${z} 0 0 0</pose>
+      <geometry><box><size>${sx} ${sy} ${sz}</size></box></geometry>
+    </collision>
+    <visual name="${name}_visual">
+      <pose>${x} ${y} ${z} 0 0 0</pose>
+      <geometry><box><size>${sx} ${sy} ${sz}</size></box></geometry>
+      <material>
+        <ambient>${r} ${g} ${b} 1</ambient>
+        <diffuse>${r} ${g} ${b} 1</diffuse>
+      </material>
+    </visual>
+  </xacro:macro>
+
+  <!-- Wall running along y at the i-th row boundary, i = 0..rows -->
+  <xacro:macro name="row_walls" params="i">
+    <xacro:if value="${i &lt;= rows}">
+      <xacro:box name="row_wall_${i}" x="${(i - rows / 2) * pitch}" y="0" z="${wall_h / 2}"
+                 sx="${wall_t}" sy="${len_y}" sz="${wall_h}" r="0.45" g="0.3" b="0.18" />
+      <xacro:row_walls i="${i + 1}" />
+    </xacro:if>
+  </xacro:macro>
+
+  <!-- Wall running along x at the j-th column boundary, j = 0..cols; stops at the row walls -->
+  <xacro:macro name="col_walls" params="j">
+    <xacro:if value="${j &lt;= cols}">
+      <xacro:box name="col_wall_${j}" x="0" y="${(j - cols / 2) * pitch}" z="${wall_h / 2}"
+                 sx="${len_x - 2 * wall_t}" sy="${wall_t}" sz="${wall_h}" r="0.45" g="0.3" b="0.18" />
+      <xacro:col_walls j="${j + 1}" />
+    </xacro:if>
+  </xacro:macro>
+
+  <model name="$(arg name)">
+    <static>true</static>
+    <link name="link">
+      <xacro:box name="plate" x="0" y="0" z="${plate_t / 2}"
+                 sx="${len_x}" sy="${len_y}" sz="${plate_t}" r="0.35" g="0.22" b="0.12" />
+      <xacro:row_walls i="0" />
+      <xacro:col_walls j="0" />
+    </link>
+  </model>
+</sdf>
