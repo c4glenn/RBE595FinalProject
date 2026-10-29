@@ -50,7 +50,7 @@ RUN rosdep update || true
 # Source ROS2 setup automatically for interactive shells
 RUN echo "source /opt/ros/jazzy/setup.bash" >> /home/$USERNAME/.bashrc \
     && echo "[ -f /workspace/underlay_ws/install/setup.bash ] && source /workspace/underlay_ws/install/setup.bash" >> /home/$USERNAME/.bashrc \
-    && echo "[ -f /workspace/install/setup.bash ] && source /workspace/install/setup.bash" >> /home/$USERNAME/.bashrc
+    && echo "[ -f /workspace/workspace/install/setup.bash ] && source /workspace/workspace/install/setup.bash" >> /home/$USERNAME/.bashrc
 
 USER $USERNAME
 WORKDIR /workspace

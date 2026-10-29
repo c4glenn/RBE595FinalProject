@@ -1,0 +1,85 @@
+<?xml version="1.0"?>
+<!--
+  Reusable spice bottle: a cylinder with a tag36h11 AprilTag on its cap.
+
+  The model origin is the centre of the bottle's base, so spawning it at the table-top height
+  places it on the table. Spawn it with ros_gz_sim `create -string <output of xacro>`; see
+  spawn_spice_bottle() in launch/sim.launch.py.
+
+  Arguments:
+    name      model name (must be unique in the world)
+    tag_id    tag36h11 ID shown on the cap (images live in tags/, see tools/fetch_tags.py)
+    radius    bottle radius [m]
+    height    bottle height [m]
+    mass      bottle mass [kg]
+    tag_size  edge length of the tag image including its white border [m];
+              must satisfy tag_size * sqrt(2) <= 2 * radius to fit on the cap
+-->
+<sdf xmlns:xacro="http://ros.org/wiki/xacro" version="1.9">
+  <xacro:arg name="name" default="spice_bottle" />
+  <xacro:arg name="tag_id" default="0" />
+  <xacro:arg name="radius" default="0.025" />
+  <xacro:arg name="height" default="0.1" />
+  <xacro:arg name="mass" default="0.15" />
+  <xacro:arg name="tag_size" default="0.034" />
+
+  <xacro:property name="r" value="$(arg radius)" />
+  <xacro:property name="h" value="$(arg height)" />
+  <xacro:property name="m" value="$(arg mass)" />
+  <xacro:property name="tag_file"
+    value="$(find rbe595_sim)/tags/tag36_11_${'%05d' % int('$(arg tag_id)')}.png" />
+
+  <model name="$(arg name)">
+    <link name="link">
+      <inertial>
+        <pose>0 0 ${h / 2} 0 0 0</pose>
+        <mass>${m}</mass>
+        <inertia>
+          <ixx>${m * (3 * r * r + h * h) / 12}</ixx>
+          <iyy>${m * (3 * r * r + h * h) / 12}</iyy>
+          <izz>${m * r * r / 2}</izz>
+        </inertia>
+      </inertial>
+
+      <collision name="body_collision">
+        <pose>0 0 ${h / 2} 0 0 0</pose>
+        <geometry><cylinder><radius>${r}</radius><length>${h}</length></cylinder></geometry>
+        <surface>
+          <friction>
+            <ode><mu>1.0</mu><mu2>1.0</mu2></ode>
+          </friction>
+        </surface>
+      </collision>
+
+      <visual name="body_visual">
+        <pose>0 0 ${h / 2} 0 0 0</pose>
+        <geometry><cylinder><radius>${r}</radius><length>${h}</length></cylinder></geometry>
+        <material>
+          <ambient>0.75 0.2 0.15 1</ambient>
+          <diffuse>0.75 0.2 0.15 1</diffuse>
+        </material>
+      </visual>
+
+      <!-- Tag: a flat textured plane just above the cap so it does not z-fight with it -->
+      <visual name="tag_visual">
+        <pose>0 0 ${h + 0.0005} 0 0 0</pose>
+        <geometry>
+          <plane>
+            <normal>0 0 1</normal>
+            <size>$(arg tag_size) $(arg tag_size)</size>
+          </plane>
+        </geometry>
+        <material>
+          <diffuse>1 1 1 1</diffuse>
+          <pbr>
+            <metal>
+              <albedo_map>${tag_file}</albedo_map>
+              <roughness>1.0</roughness>
+              <metalness>0.0</metalness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

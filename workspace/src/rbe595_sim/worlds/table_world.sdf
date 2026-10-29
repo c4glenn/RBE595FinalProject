@@ -1,0 +1,108 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <world name="table_world">
+    <physics name="1ms" type="ignored">
+      <max_step_size>0.001</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry><plane><normal>0 0 1</normal><size>100 100</size></plane></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>100 100</size></plane></geometry>
+          <material>
+            <ambient>0.8 0.8 0.8 1</ambient>
+            <diffuse>0.8 0.8 0.8 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- 1.2 x 0.8 m table, top surface at z = 0.75 m, centred on the world origin -->
+    <model name="table">
+      <static>true</static>
+      <link name="link">
+        <collision name="top_collision">
+          <pose>0 0 0.725 0 0 0</pose>
+          <geometry><box><size>1.2 0.8 0.05</size></box></geometry>
+        </collision>
+        <visual name="top_visual">
+          <pose>0 0 0.725 0 0 0</pose>
+          <geometry><box><size>1.2 0.8 0.05</size></box></geometry>
+          <material>
+            <ambient>0.55 0.4 0.25 1</ambient>
+            <diffuse>0.55 0.4 0.25 1</diffuse>
+          </material>
+        </visual>
+
+        <collision name="leg_fl_collision">
+          <pose>0.55 0.35 0.35 0 0 0</pose>
+          <geometry><box><size>0.05 0.05 0.7</size></box></geometry>
+        </collision>
+        <visual name="leg_fl_visual">
+          <pose>0.55 0.35 0.35 0 0 0</pose>
+          <geometry><box><size>0.05 0.05 0.7</size></box></geometry>
+          <material>
+            <ambient>0.3 0.3 0.3 1</ambient>
+            <diffuse>0.3 0.3 0.3 1</diffuse>
+          </material>
+        </visual>
+
+        <collision name="leg_fr_collision">
+          <pose>0.55 -0.35 0.35 0 0 0</pose>
+          <geometry><box><size>0.05 0.05 0.7</size></box></geometry>
+        </collision>
+        <visual name="leg_fr_visual">
+          <pose>0.55 -0.35 0.35 0 0 0</pose>
+          <geometry><box><size>0.05 0.05 0.7</size></box></geometry>
+          <material>
+            <ambient>0.3 0.3 0.3 1</ambient>
+            <diffuse>0.3 0.3 0.3 1</diffuse>
+          </material>
+        </visual>
+
+        <collision name="leg_bl_collision">
+          <pose>-0.55 0.35 0.35 0 0 0</pose>
+          <geometry><box><size>0.05 0.05 0.7</size></box></geometry>
+        </collision>
+        <visual name="leg_bl_visual">
+          <pose>-0.55 0.35 0.35 0 0 0</pose>
+          <geometry><box><size>0.05 0.05 0.7</size></box></geometry>
+          <material>
+            <ambient>0.3 0.3 0.3 1</ambient>
+            <diffuse>0.3 0.3 0.3 1</diffuse>
+          </material>
+        </visual>
+
+        <collision name="leg_br_collision">
+          <pose>-0.55 -0.35 0.35 0 0 0</pose>
+          <geometry><box><size>0.05 0.05 0.7</size></box></geometry>
+        </collision>
+        <visual name="leg_br_visual">
+          <pose>-0.55 -0.35 0.35 0 0 0</pose>
+          <geometry><box><size>0.05 0.05 0.7</size></box></geometry>
+          <material>
+            <ambient>0.3 0.3 0.3 1</ambient>
+            <diffuse>0.3 0.3 0.3 1</diffuse>
+          </material>
+        </visual>
+      </link>
+    </model>
+  </world>
+</sdf>
