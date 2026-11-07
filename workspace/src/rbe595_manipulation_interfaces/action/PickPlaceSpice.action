@@ -1,0 +1,11 @@
+# Goal
+string spice_id          # v1: logged, then ignored -- always targets the hardcoded rack slot
+---
+# Result
+bool success
+string message            # "ok", or "failed at step <name>: <reason>"
+---
+# Feedback
+string step_name          # e.g. "2/8 grasp_top"
+int32 step_index          # 1..8
+int32 total_steps         # 8
