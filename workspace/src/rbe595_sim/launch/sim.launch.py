@@ -4,10 +4,9 @@ import random
 import re
 
 import yaml
-from ament_index_python.packages import get_package_prefix, get_package_share_directory
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription, Substitution
 from launch.actions import (
-    AppendEnvironmentVariable,
     DeclareLaunchArgument,
     IncludeLaunchDescription,
     LogInfo,
@@ -119,18 +118,21 @@ def load_spice_rack_cfg():
 
 
 def spice_rack_slots(x, y, z=0.75, yaw=0.0):
-    """World (x, y, z) of every slot floor centre, row-major, for a rack spawned at (x, y, z, yaw).
+    """World (x, y, z) of every slot floor centre, for a rack spawned at (x, y, z, yaw).
 
-    Slot layout comes from config/spice_rack.yaml (see the formula there).
+    Order matches the rack frame drawing's S0..S(rows*cols-1) numbering: bottom-to-top within a
+    column, then left-to-right across columns. Slot layout comes from config/spice_rack.yaml (see
+    the formula there).
     """
     cfg = load_spice_rack_cfg()
-    rows, cols, pitch = cfg["rows"], cfg["cols"], cfg["pitch"]
+    rows, cols = cfg["rows"], cfg["cols"]
+    pitch_x, pitch_y, col_offset = cfg["pitch_x"], cfg["pitch_y"], cfg["col_offset"]
     c, s = math.cos(yaw), math.sin(yaw)
     slots = []
-    for row in range(rows):
-        for col in range(cols):
-            sx = (row - (rows - 1) / 2) * pitch
-            sy = (col - (cols - 1) / 2) * pitch
+    for col in range(cols):
+        for row in range(rows):
+            sx = (col - (cols - 1) / 2) * pitch_x + col_offset
+            sy = (row - (rows - 1) / 2) * pitch_y
             slots.append((x + c * sx - s * sy, y + s * sx + c * sy, z + cfg["plate_thickness"]))
     return slots
 
@@ -141,9 +143,8 @@ def random_bowl_position(rng, base_x, base_y, rack_x, rack_y):
     Assumes an unrotated rack (yaw = 0).
     """
     cfg = load_spice_rack_cfg()
-    wall_t = cfg["pitch"] - cfg["cell"]
-    rack_half_x = (cfg["rows"] * cfg["pitch"] + wall_t) / 2
-    rack_half_y = (cfg["cols"] * cfg["pitch"] + wall_t) / 2
+    rack_half_x = cfg["plate_len_x"] / 2
+    rack_half_y = cfg["plate_len_y"] / 2
     # Bowl centre limits, keeping the whole rim on the table
     max_x = TABLE_HALF_X - BOWL_RADIUS - BOWL_EDGE_MARGIN
     max_y = TABLE_HALF_Y - BOWL_RADIUS - BOWL_EDGE_MARGIN
@@ -187,9 +188,9 @@ def generate_launch_description():
     # Server only, rendering offscreen (sensors still work); for machines with no display.
     headless = LaunchConfiguration("headless")
 
-    # Kortex 7 DoF Gen3 controller configuration
+    # Kortex 6 DoF Gen3 Lite controller configuration
     controllers_file = PathJoinSubstitution(
-        [FindPackageShare("kortex_description"), "arms/gen3/7dof/config/ros2_controllers.yaml"]
+        [FindPackageShare("kortex_description"), "arms/gen3_lite/6dof/config/ros2_controllers.yaml"]
     )
 
     robot_description_content = Command(
@@ -201,8 +202,8 @@ def generate_launch_description():
             ),
             " robot_ip:=xxx.yyy.zzz.www",
             " name:=", robot_name,
-            " arm:=gen3",
-            " dof:=7",
+            " arm:=gen3_lite",
+            " dof:=6",
             " vision:=false",
             " prefix:=''",
             " sim_gazebo:=true",
@@ -213,11 +214,10 @@ def generate_launch_description():
 
     world = PathJoinSubstitution([FindPackageShare("rbe595_sim"), "worlds", "table_world.sdf"])
 
-    robotiq_share = os.path.join(get_package_prefix("robotiq_description"), "share")
-
     # Rack centred 0.5 m in front of the arm base: every slot is within 0.65 m of it.
     rack_x, rack_y = 0.1, 0.0
-    # A bottle in every slot, tag IDs 0.. in row-major order. Spawned 1 mm above the slot floor
+    # A bottle in every slot, tag IDs 0.. matching the S0..S5 slot numbering from
+    # spice_rack_slots(). Spawned 1 mm above the slot floor
     # so it does not start in contact with the rack.
     spice_bottles = [
         spawn_spice_bottle(f"spice_bottle_{i}", tag_id=i, x=sx, y=sy, z=sz + 0.001)
@@ -226,11 +226,11 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
-            DeclareLaunchArgument("robot_name", default_value="gen3"),
+            DeclareLaunchArgument("robot_name", default_value="gen3_lite"),
             DeclareLaunchArgument(
                 "gripper",
-                default_value="robotiq_2f_85",
-                choices=["robotiq_2f_85", "robotiq_2f_140", ""],
+                default_value="gen3_lite_2f",
+                choices=["gen3_lite_2f", ""],
             ),
             DeclareLaunchArgument("x", default_value="-0.4"),
             DeclareLaunchArgument("y", default_value="0.0"),
@@ -241,7 +241,6 @@ def generate_launch_description():
             DeclareLaunchArgument("bowl_y", default_value=""),
             # Random seed for the bowl position; empty for a different position every launch.
             DeclareLaunchArgument("seed", default_value=""),
-            AppendEnvironmentVariable("GZ_SIM_RESOURCE_PATH", robotiq_share),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
                     [FindPackageShare("ros_gz_sim"), "/launch/gz_sim.launch.py"]
@@ -301,7 +300,7 @@ def generate_launch_description():
             Node(
                 package="controller_manager",
                 executable="spawner",
-                arguments=["robotiq_gripper_controller", "-c", "/controller_manager"],
+                arguments=["gen3_lite_2f_gripper_controller", "-c", "/controller_manager"],
             ),
         ]
     )

@@ -19,9 +19,9 @@ TOP_TILT_FROM_VERTICAL = math.pi  # roll -- straight down
 SIDE_ORIENTATION_RPY = (math.pi / 2, 0.0, math.pi / 2)  # horizontal approach along world +X
 
 # --- rack geometry (rbe595_sim/launch/sim.launch.py + config/spice_rack.yaml) ---
-RACK_SLOT_XY = (0.0, -0.15)
+RACK_SLOT_XY = (0.06925, -0.064)  # world (x, y) of slot S0 (rack spawned at x=0.1, y=0.0)
 RACK_SLOT_FLOOR_Z = 0.76       # 0.75 rack spawn z + 0.01 plate_thickness
-RACK_WALL_TOP_Z = RACK_SLOT_FLOOR_Z + 0.04   # + wall_height
+RACK_WALL_TOP_Z = RACK_SLOT_FLOOR_Z + 0.024   # + wall_height
 BOTTLE_BASE_Z = RACK_SLOT_FLOOR_Z + 0.001    # bottle spawned 1mm above the slot floor
 BOTTLE_TOP_Z = BOTTLE_BASE_Z + 0.1           # + bottle height
 

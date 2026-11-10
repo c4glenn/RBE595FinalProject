@@ -12,8 +12,8 @@ from rbe595_manipulation.arm_client import world_to_base_link
 TABLE_TOP_CENTER_WORLD = (0.0, 0.0, 0.725)
 TABLE_TOP_SIZE = (1.2, 1.5, 0.05)
 
-RACK_CENTER_WORLD = (0.1, 0.0, 0.775)  # (0.75 spawn z + 0.80 wall-top z) / 2
-RACK_SIZE = (0.34, 0.44, 0.05)  # half-extents from random_bowl_position()'s own formula, x2
+RACK_CENTER_WORLD = (0.1, 0.0, 0.767)  # (0.75 spawn z + 0.784 wall-top z) / 2
+RACK_SIZE = (0.2315, 0.206, 0.034)  # plate_len_x, plate_len_y, wall-top z - spawn z
 
 
 def _box(frame_id: str, object_id: str, center_world, size) -> CollisionObject:

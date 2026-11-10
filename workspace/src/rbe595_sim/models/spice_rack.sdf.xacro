@@ -1,11 +1,24 @@
 <?xml version="1.0"?>
 <!--
-  Spice rack: a flat base plate with an egg-crate lattice of low walls forming rows x cols square
-  pockets (layout in config/spice_rack.yaml). Bottles stand upright in the pockets and are open from
-  above, so the arm can grasp them from the top and drop them in with a few mm of clearance per side.
+  Spice rack: a flat base plate with rows x cols circular pockets, each a conical chamfer
+  approximated by n_segments tilted straight pieces (extends the ring-of-segments technique in
+  bowl.sdf.xacro with a pitch tilt). Bottles stand upright in the pockets and are open from above,
+  so the arm can grasp them from the top.
 
-  Walls are only wall_height tall so most of each bottle stays exposed for the gripper fingers, and
-  the pitch leaves a gap between neighbouring bottles for the open fingers to straddle one bottle.
+  Each pocket LOOKS wide (cell_mouth) at the rim, chamfering down to a narrower seat (cell)
+  sized to the spice jars at the floor, but that chamfer is visual only. A bottle resting on a
+  sloped, facet-approximated surface tends to settle on one facet rather than slide to centre,
+  so it comes to rest tilted a few degrees off vertical instead of standing straight; the actual
+  collision wall is a separate, plain vertical ring at the (cell) seat radius, the same kind of
+  wall bowl.sdf.xacro uses, so the physics the bottle feels never has a slope to tip on. Pocket
+  walls are only wall_height tall so most of each bottle stays exposed for the gripper fingers,
+  and the pitch leaves a gap beside each pocket for the open fingers to straddle one bottle
+  (pitch_x, the gripper closing axis, is the roomier of the two).
+
+  Two square rack_tag fiducials, real tag36h11 AprilTag images like the bottles' cap tags,
+  sit flush on the base plate at the top-left and bottom-left corners, for rack localisation.
+
+  Layout (pitch, plate size, tag size) comes from config/spice_rack.yaml.
 
   Spawn with ros_gz_sim `create -string <output of xacro>`; see launch/sim.launch.py.
 
@@ -18,21 +31,50 @@
   <xacro:property name="cfg" value="${xacro.load_yaml('$(find rbe595_sim)/config/spice_rack.yaml')}" />
   <xacro:property name="rows" value="${cfg['rows']}" />
   <xacro:property name="cols" value="${cfg['cols']}" />
-  <xacro:property name="pitch" value="${cfg['pitch']}" />
-  <xacro:property name="wall_t" value="${cfg['pitch'] - cfg['cell']}" />
-  <xacro:property name="wall_h" value="${cfg['plate_thickness'] + cfg['wall_height']}" />
+  <xacro:property name="pitch_x" value="${cfg['pitch_x']}" />
+  <xacro:property name="pitch_y" value="${cfg['pitch_y']}" />
+  <xacro:property name="col_offset" value="${cfg['col_offset']}" />
+  <xacro:property name="cell" value="${cfg['cell']}" />
+  <xacro:property name="cell_mouth" value="${cfg['cell_mouth']}" />
+  <xacro:property name="wall_height" value="${cfg['wall_height']}" />
   <xacro:property name="plate_t" value="${cfg['plate_thickness']}" />
-  <!-- outer footprint -->
-  <xacro:property name="len_x" value="${rows * pitch + wall_t}" />
-  <xacro:property name="len_y" value="${cols * pitch + wall_t}" />
+  <xacro:property name="len_x" value="${cfg['plate_len_x']}" />
+  <xacro:property name="len_y" value="${cfg['plate_len_y']}" />
+  <xacro:property name="tag_size" value="${cfg['tag_size']}" />
+  <xacro:property name="rack_tag_top_id" value="${cfg['rack_tag_top_id']}" />
+  <xacro:property name="rack_tag_bottom_id" value="${cfg['rack_tag_bottom_id']}" />
 
-  <xacro:macro name="box" params="name x y z sx sy sz r g b">
+  <xacro:property name="seg_t" value="0.005" />
+
+  <!-- Visual chamfer: n_visual_segments tilted pieces on a cone from radius (cell/2) at the
+       floor to (cell_mouth/2) at the rim, each centred on a wall-thickness-inset radius at its
+       own height, same ring approximation as bowl.sdf.xacro, extended with a pitch tilt so each
+       piece's own height direction follows the slope instead of standing vertical. Visual only;
+       see pocket_collision below for why. -->
+  <xacro:property name="n_visual_segments" value="16" />
+  <xacro:property name="r_bottom" value="${cell / 2 + seg_t / 2}" />
+  <xacro:property name="r_top" value="${cell_mouth / 2 + seg_t / 2}" />
+  <xacro:property name="r_mid" value="${(r_bottom + r_top) / 2}" />
+  <xacro:property name="slant_dr" value="${r_top - r_bottom}" />
+  <xacro:property name="slant_len" value="${sqrt(wall_height ** 2 + slant_dr ** 2)}" />
+  <xacro:property name="tilt" value="${atan2(slant_dr, wall_height)}" />
+  <!-- sized at the wider (rim) end so segments close the gap there; they overlap lower down -->
+  <xacro:property name="visual_seg_len" value="${2 * (r_top + seg_t / 2) * tan(pi / n_visual_segments)}" />
+
+  <!-- Collision wall: n_collision_segments plain vertical pieces at the (cell) seat radius,
+       fewer segments than the visual ring since a coarse vertical wall is all the physics needs
+       (and it's lighter on the solver: see the header note on why this isn't the sloped shape). -->
+  <xacro:property name="n_collision_segments" value="8" />
+  <xacro:property name="r_collision" value="${cell / 2 + seg_t / 2}" />
+  <xacro:property name="collision_seg_len" value="${2 * (cell / 2 + seg_t) * tan(pi / n_collision_segments)}" />
+
+  <xacro:macro name="box" params="name x y z sx sy sz r g b roll:=0 pitch:=0 yaw:=0">
     <collision name="${name}_collision">
-      <pose>${x} ${y} ${z} 0 0 0</pose>
+      <pose>${x} ${y} ${z} ${roll} ${pitch} ${yaw}</pose>
       <geometry><box><size>${sx} ${sy} ${sz}</size></box></geometry>
     </collision>
     <visual name="${name}_visual">
-      <pose>${x} ${y} ${z} 0 0 0</pose>
+      <pose>${x} ${y} ${z} ${roll} ${pitch} ${yaw}</pose>
       <geometry><box><size>${sx} ${sy} ${sz}</size></box></geometry>
       <material>
         <ambient>${r} ${g} ${b} 1</ambient>
@@ -41,21 +83,90 @@
     </visual>
   </xacro:macro>
 
-  <!-- Wall running along y at the i-th row boundary, i = 0..rows -->
-  <xacro:macro name="row_walls" params="i">
-    <xacro:if value="${i &lt;= rows}">
-      <xacro:box name="row_wall_${i}" x="${(i - rows / 2) * pitch}" y="0" z="${wall_h / 2}"
-                 sx="${wall_t}" sy="${len_y}" sz="${wall_h}" r="0.45" g="0.3" b="0.18" />
-      <xacro:row_walls i="${i + 1}" />
+  <xacro:macro name="visual_box" params="name x y z sx sy sz r g b roll:=0 pitch:=0 yaw:=0">
+    <visual name="${name}_visual">
+      <pose>${x} ${y} ${z} ${roll} ${pitch} ${yaw}</pose>
+      <geometry><box><size>${sx} ${sy} ${sz}</size></box></geometry>
+      <material>
+        <ambient>${r} ${g} ${b} 1</ambient>
+        <diffuse>${r} ${g} ${b} 1</diffuse>
+      </material>
+    </visual>
+  </xacro:macro>
+
+  <xacro:macro name="collision_box" params="name x y z sx sy sz roll:=0 pitch:=0 yaw:=0">
+    <collision name="${name}_collision">
+      <pose>${x} ${y} ${z} ${roll} ${pitch} ${yaw}</pose>
+      <geometry><box><size>${sx} ${sy} ${sz}</size></box></geometry>
+    </collision>
+  </xacro:macro>
+
+  <!-- A flat square visual/collision with a tag36h11 image (tags/tag36_11_<id>.png) textured
+       on top of it, for an AprilTag fiducial flush with the plate; same texturing approach as
+       spice_bottle.sdf.xacro's cap tag. -->
+  <xacro:macro name="rack_tag" params="name cx cy tag_id">
+    <xacro:box name="${name}" x="${cx}" y="${cy}" z="${plate_t + 0.0005}"
+               sx="${tag_size}" sy="${tag_size}" sz="0.001" r="1" g="1" b="1" />
+    <visual name="${name}_tag_visual">
+      <pose>${cx} ${cy} ${plate_t + 0.0011} 0 0 0</pose>
+      <geometry>
+        <plane>
+          <normal>0 0 1</normal>
+          <size>${tag_size} ${tag_size}</size>
+        </plane>
+      </geometry>
+      <material>
+        <diffuse>1 1 1 1</diffuse>
+        <pbr>
+          <metal>
+            <albedo_map>$(find rbe595_sim)/tags/tag36_11_${'%05d' % tag_id}.png</albedo_map>
+            <roughness>1.0</roughness>
+            <metalness>0.0</metalness>
+          </metal>
+        </pbr>
+      </material>
+    </visual>
+  </xacro:macro>
+
+  <!-- The i-th visual chamfer piece of the pocket centred at (cx, cy), i = 0..n_visual_segments-1 -->
+  <xacro:macro name="pocket_visual" params="slot_name cx cy i">
+    <xacro:if value="${i &lt; n_visual_segments}">
+      <xacro:property name="a" value="${2 * pi * i / n_visual_segments}" />
+      <xacro:visual_box name="${slot_name}_wall_${i}"
+                 x="${cx + r_mid * cos(a)}" y="${cy + r_mid * sin(a)}"
+                 z="${plate_t + wall_height / 2}"
+                 sx="${seg_t}" sy="${visual_seg_len}" sz="${slant_len}"
+                 r="0.45" g="0.3" b="0.18" pitch="${tilt}" yaw="${a}" />
+      <xacro:pocket_visual slot_name="${slot_name}" cx="${cx}" cy="${cy}" i="${i + 1}" />
     </xacro:if>
   </xacro:macro>
 
-  <!-- Wall running along x at the j-th column boundary, j = 0..cols; stops at the row walls -->
-  <xacro:macro name="col_walls" params="j">
-    <xacro:if value="${j &lt;= cols}">
-      <xacro:box name="col_wall_${j}" x="0" y="${(j - cols / 2) * pitch}" z="${wall_h / 2}"
-                 sx="${len_x - 2 * wall_t}" sy="${wall_t}" sz="${wall_h}" r="0.45" g="0.3" b="0.18" />
-      <xacro:col_walls j="${j + 1}" />
+  <!-- The i-th collision piece of the pocket centred at (cx, cy), i = 0..n_collision_segments-1;
+       a plain vertical ring at the (cell) seat radius; see the header note on why this is kept
+       separate from, and simpler than, the visual chamfer above. -->
+  <xacro:macro name="pocket_collision" params="slot_name cx cy i">
+    <xacro:if value="${i &lt; n_collision_segments}">
+      <xacro:property name="a" value="${2 * pi * i / n_collision_segments}" />
+      <xacro:collision_box name="${slot_name}_collision_${i}"
+                 x="${cx + r_collision * cos(a)}" y="${cy + r_collision * sin(a)}"
+                 z="${plate_t + wall_height / 2}"
+                 sx="${seg_t}" sy="${collision_seg_len}" sz="${wall_height}"
+                 yaw="${a}" />
+      <xacro:pocket_collision slot_name="${slot_name}" cx="${cx}" cy="${cy}" i="${i + 1}" />
+    </xacro:if>
+  </xacro:macro>
+
+  <!-- Slot idx = col * rows + row, matching the rack frame drawing's S0..S(rows*cols-1)
+       numbering: bottom-to-top within a column, then left-to-right across columns. -->
+  <xacro:macro name="slot" params="idx">
+    <xacro:if value="${idx &lt; rows * cols}">
+      <xacro:property name="col" value="${idx // rows}" />
+      <xacro:property name="row" value="${idx % rows}" />
+      <xacro:property name="cx" value="${(col - (cols - 1) / 2.0) * pitch_x + col_offset}" />
+      <xacro:property name="cy" value="${(row - (rows - 1) / 2.0) * pitch_y}" />
+      <xacro:pocket_visual slot_name="s${idx}" cx="${cx}" cy="${cy}" i="0" />
+      <xacro:pocket_collision slot_name="s${idx}" cx="${cx}" cy="${cy}" i="0" />
+      <xacro:slot idx="${idx + 1}" />
     </xacro:if>
   </xacro:macro>
 
@@ -64,8 +175,14 @@
     <link name="link">
       <xacro:box name="plate" x="0" y="0" z="${plate_t / 2}"
                  sx="${len_x}" sy="${len_y}" sz="${plate_t}" r="0.35" g="0.22" b="0.12" />
-      <xacro:row_walls i="0" />
-      <xacro:col_walls j="0" />
+      <xacro:slot idx="0" />
+      <!-- rack_tag fiducials, flush against the left edge at the top-left/bottom-left corners -->
+      <xacro:rack_tag name="rack_tag_top"
+                       cx="${-len_x / 2 + tag_size / 2}" cy="${len_y / 2 - tag_size / 2}"
+                       tag_id="${rack_tag_top_id}" />
+      <xacro:rack_tag name="rack_tag_bottom"
+                       cx="${-len_x / 2 + tag_size / 2}" cy="${-len_y / 2 + tag_size / 2}"
+                       tag_id="${rack_tag_bottom_id}" />
     </link>
   </model>
 </sdf>

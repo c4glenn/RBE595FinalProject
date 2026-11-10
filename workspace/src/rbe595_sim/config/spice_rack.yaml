@@ -1,13 +1,34 @@
 # Spice rack layout, shared by models/spice_rack.sdf.xacro and anything that needs slot poses.
 #
-# Rack frame: origin at the centre of the underside of the base plate, +x along the rows' direction
-# of increasing row index, +y along increasing column index. Slot (row, col) centre is
-#   x = (row - (rows - 1) / 2) * pitch
-#   y = (col - (cols - 1) / 2) * pitch
+# Rack frame: origin at the centre of the underside of the base plate, +x along increasing column
+# index (the gripper closing axis), +y along increasing row index. Slot (row, col) centre is
+#   x = (col - (cols - 1) / 2) * pitch_x + col_offset
+#   y = (row - (rows - 1) / 2) * pitch_y
 #   z = plate_thickness            (the floor a bottle stands on)
+# col_offset shifts the whole slot grid off-centre in x, since the plate is wider on the left
+# (where the rack_tag fiducials sit) than the right.
+#
+# Measured from a corner-origin reference drawing (plate corner at local (0, 0), size
+# plate_len_x x plate_len_y): col 0 at local x = 85.0 mm, col 1 at x = 178.5 mm, rows at
+# local y = 39.0 / 103.0 / 167.0 mm. tag_size is the side of each square rack_tag fiducial,
+# flush against the left edge at the top-left and bottom-left corners.
+#
+# Each pocket is a chamfer: cell_mouth wide at the rim for an easy drop-in, narrowing to cell
+# at the floor, snug around the spice bottle (models/spice_bottle.sdf.xacro, radius 0.024165 m
+# -> 0.04833 m diameter). cell_mouth stays <= pitch_y - 4 mm so neighbouring pockets' rims
+# don't touch, and matches the old uniform pocket size so it's still tangent to the rack_tag
+# fiducials' edge.
 rows: 3
-cols: 4
-pitch: 0.10            # slot centre-to-centre distance [m]
-cell: 0.060            # square pocket inner width [m]; a 0.050 m bottle leaves 5 mm each side
-wall_height: 0.04      # pocket depth above the floor [m]; the rest of the bottle stays free to grasp
+cols: 2
+pitch_x: 0.0935        # slot centre-to-centre distance along x [m]
+pitch_y: 0.064         # slot centre-to-centre distance along y [m]
+col_offset: 0.016      # +x shift of the slot grid centre from the plate centre [m]
+cell: 0.052            # pocket diameter at the floor [m], snug around the ~0.0483 m bottle
+cell_mouth: 0.060      # pocket diameter at the rim [m], wider for an easy drop-in
+wall_height: 0.024     # pocket wall height above the floor [m]; the rest of the bottle stays free to grasp
 plate_thickness: 0.01  # base plate [m]
+plate_len_x: 0.2315    # base plate outer size along x [m]
+plate_len_y: 0.206     # base plate outer size along y [m]
+tag_size: 0.055        # rack_tag fiducial square side [m]
+rack_tag_top_id: 6     # tag36h11 ID for the top-left rack_tag (bottles use IDs 0-5)
+rack_tag_bottom_id: 7  # tag36h11 ID for the bottom-left rack_tag
