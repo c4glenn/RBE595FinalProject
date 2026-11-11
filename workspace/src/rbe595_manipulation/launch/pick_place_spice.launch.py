@@ -45,7 +45,7 @@ def generate_launch_description():
                 package="rbe595_manipulation",
                 executable="pick_place_spice_action_server",
                 output="screen",
-                parameters=[{"use_sim_time": True}],
+                parameters=[{"use_sim_time": False}],
             ),
         ]
     )
