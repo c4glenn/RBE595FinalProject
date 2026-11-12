@@ -1,28 +1,63 @@
-from control_msgs.action import ParallelGripperCommand
+import time
+
+from control_msgs.action import GripperCommand
 from rclpy.action import ActionClient
 from rclpy.node import Node
+from sensor_msgs.msg import JointState
 
 from rbe595_manipulation._wait import wait_for_future
 
-GRIPPER_JOINT_NAME = "robotiq_85_left_knuckle_joint"
+# gen3_lite_2f: one actuated joint (right_finger_bottom_joint), the other finger joints mimic it.
+# Its controller is a position_controllers/GripperActionController, so the max_effort below is
+# only what the controller reports a stall against, not a force limit (URDF effort limit: 10).
+GRIPPER_JOINT = "right_finger_bottom_joint"
+GRIPPER_MAX_EFFORT = 10.0
+# Let the fingers, and anything they just let go of or closed on, come to rest before the arm's
+# next move is planned from the measured joint state.
+SETTLE_TIME_S = 1.0
 
 
 class GripperClient:
-    """Thin wrapper around the robotiq_gripper_controller's action.
-    """
+    """Thin wrapper around the gen3_lite_2f_gripper_controller's GripperCommand action."""
 
-    def __init__(self, node: Node, action_name: str = "/robotiq_gripper_controller/gripper_cmd"):
+    def __init__(
+        self, node: Node, action_name: str = "/gen3_lite_2f_gripper_controller/gripper_cmd"
+    ):
         self._node = node
-        self._client = ActionClient(node, ParallelGripperCommand, action_name)
+        self._client = ActionClient(node, GripperCommand, action_name)
+        self._finger_position = None
+        node.create_subscription(JointState, "/joint_states", self._on_joint_states, 10)
 
-    def move_to(self, position: float, timeout_s: float = 5.0, result_timeout_s: float = 15.0) -> bool:
+    def _on_joint_states(self, msg: JointState) -> None:
+        if GRIPPER_JOINT in msg.name:
+            self._finger_position = msg.position[msg.name.index(GRIPPER_JOINT)]
+
+    def grasp(self, closed: float, holding_max: float) -> bool:
+        """Close to `closed` and check something is actually held: fingers closing on a bottle
+        stop at its width, short of `holding_max`; past it they closed on nothing."""
+        if not self.move_to(closed):
+            return False
+        if self._finger_position is None:
+            self._node.get_logger().error("no /joint_states for the gripper")
+            return False
+        if self._finger_position >= holding_max:
+            self._node.get_logger().error(
+                f"grasp missed: fingers closed to {self._finger_position:.3f} "
+                f"(holding stops below {holding_max:.2f})"
+            )
+            return False
+        return True
+
+    def move_to(
+        self, position: float, timeout_s: float = 5.0, result_timeout_s: float = 15.0
+    ) -> bool:
         if not self._client.wait_for_server(timeout_sec=timeout_s):
             self._node.get_logger().error("gripper_cmd action server not available")
             return False
 
-        goal = ParallelGripperCommand.Goal()
-        goal.command.name = [GRIPPER_JOINT_NAME]
-        goal.command.position = [position]
+        goal = GripperCommand.Goal()
+        goal.command.position = position
+        goal.command.max_effort = GRIPPER_MAX_EFFORT
 
         send_future = self._client.send_goal_async(goal)
         if not wait_for_future(send_future, timeout_s):
@@ -43,4 +78,7 @@ class GripperClient:
         result = result_future.result()
         if result is None:
             return False
-        return bool(result.result.reached_goal or not result.result.stalled)
+        time.sleep(SETTLE_TIME_S)
+        # Closing on a bottle stops short of the commanded position: the controller reports
+        # that as stalled (allow_stalling: true), which is the expected outcome of a grasp.
+        return bool(result.result.reached_goal or result.result.stalled)

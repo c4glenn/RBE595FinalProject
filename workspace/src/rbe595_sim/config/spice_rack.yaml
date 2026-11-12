@@ -1,34 +1,46 @@
 # Spice rack layout, shared by models/spice_rack.sdf.xacro and anything that needs slot poses.
+# Numbers come from the printed rack's parametric CAD (spice_rack.py, exported to
+# meshes/spice_rack.stl): a 2 x 3 rack, 231 x 209 x 24 mm.
 #
-# Rack frame: origin at the centre of the underside of the base plate, +x along increasing column
-# index (the gripper closing axis), +y along increasing row index. Slot (row, col) centre is
+# Rack frame: origin at the centre of the rack's underside, +x away from the front ledge
+# (the gripper closing axis, increasing column index), +y along a row (increasing row index).
+# The CAD uses a corner origin instead (front-left-bottom corner at (0, 0, 0)); its slot centres
+# are x = 83.5 / 179.5 mm and y = 37.5 / 104.5 / 171.5 mm. In the rack frame, slot (row, col) is
 #   x = (col - (cols - 1) / 2) * pitch_x + col_offset
 #   y = (row - (rows - 1) / 2) * pitch_y
-#   z = plate_thickness            (the floor a bottle stands on)
-# col_offset shifts the whole slot grid off-centre in x, since the plate is wider on the left
-# (where the rack_tag fiducials sit) than the right.
+#   z = floor_thickness            (the floor a bottle stands on)
+# col_offset shifts the slot grid off-centre in x, since the front ledge (where the rack tags
+# sit) is deeper than the back strip.
 #
-# Measured from a corner-origin reference drawing (plate corner at local (0, 0), size
-# plate_len_x x plate_len_y): col 0 at local x = 85.0 mm, col 1 at x = 178.5 mm, rows at
-# local y = 39.0 / 103.0 / 167.0 mm. tag_size is the side of each square rack_tag fiducial,
-# flush against the left edge at the top-left and bottom-left corners.
-#
-# Each pocket is a chamfer: cell_mouth wide at the rim for an easy drop-in, narrowing to cell
-# at the floor, snug around the spice bottle (models/spice_bottle.sdf.xacro, radius 0.024165 m
-# -> 0.04833 m diameter). cell_mouth stays <= pitch_y - 4 mm so neighbouring pockets' rims
-# don't touch, and matches the old uniform pocket size so it's still tangent to the rack_tag
-# fiducials' edge.
+# Each pocket is a straight bore (cell) with a 45 deg lead-in at the mouth (cell_mouth), so the
+# lead-in is (cell_mouth - cell) / 2 = 4 mm deep and the bore below it pocket_depth minus that;
+# the jar (models/spice_bottle.sdf.xacro, 48.3 mm) gets ~1.35 mm radial play in the bore and the
+# lead-in catches it up to ~5 mm off-centre. Both are in the collision model.
 rows: 3
 cols: 2
-pitch_x: 0.0935        # slot centre-to-centre distance along x [m]
-pitch_y: 0.064         # slot centre-to-centre distance along y [m]
-col_offset: 0.016      # +x shift of the slot grid centre from the plate centre [m]
-cell: 0.052            # pocket diameter at the floor [m], snug around the ~0.0483 m bottle
-cell_mouth: 0.060      # pocket diameter at the rim [m], wider for an easy drop-in
-wall_height: 0.024     # pocket wall height above the floor [m]; the rest of the bottle stays free to grasp
-plate_thickness: 0.01  # base plate [m]
-plate_len_x: 0.2315    # base plate outer size along x [m]
-plate_len_y: 0.206     # base plate outer size along y [m]
-tag_size: 0.055        # rack_tag fiducial square side [m]
-rack_tag_top_id: 6     # tag36h11 ID for the top-left rack_tag (bottles use IDs 0-5)
-rack_tag_bottom_id: 7  # tag36h11 ID for the bottom-left rack_tag
+pitch_x: 0.096         # slot centre-to-centre distance along x [m]
+pitch_y: 0.067         # slot centre-to-centre distance along y [m]
+col_offset: 0.016      # +x shift of the slot grid centre from the rack centre [m]
+cell: 0.051            # pocket bore diameter [m]
+cell_mouth: 0.059      # pocket diameter at the rim, after the lead-in chamfer [m]
+pocket_depth: 0.020    # floor to rim [m]
+floor_thickness: 0.004 # material under each pocket [m]
+rack_height: 0.024     # overall height, floor_thickness + pocket_depth [m]
+len_x: 0.231           # outer size along x [m]
+len_y: 0.209           # outer size along y [m]
+# The rack's floor collision is a square this wide, centred under the rack, instead of the real
+# len_x x len_y. Under gz-physics bullet-featherstone, a bottle standing within ~5 cm of a small,
+# thin box's edge never settles: it keeps rocking (up to ~17 deg tilt, ~6 mm lift), and with the
+# pocket walls removed it tips over. A floor collision this wide keeps every bottle well inside it
+# (measured: < 0.01 deg tilt, no lift; 0.40 m still left one corner bottle rocking ~1 deg, 0.30 m
+# more). The visual stays the real rack; the extra collision is a hidden floor_thickness step
+# around it, which sim.launch.py also keeps the random bowl off.
+floor_collision_size: 0.50
+# Rack datum tags: tag36h11 stickers in 0.4 mm recesses in the top face of the front ledge.
+# tag_size is the black-border edge (what apriltag_ros calls the tag size); the textured square
+# also carries the image's one-cell white border, so it is tag_size * 10 / 8 wide.
+tag_size: 0.036
+tag_inset_x: 0.023     # tag centre from the front (-x) edge [m]
+tag_inset_y: 0.028     # tag centre from the -y / +y edges [m]
+rack_tag_top_id: 6     # tag36h11 ID for the +y rack tag (bottles use IDs 0-5)
+rack_tag_bottom_id: 7  # tag36h11 ID for the -y rack tag

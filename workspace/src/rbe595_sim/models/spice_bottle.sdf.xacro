@@ -25,7 +25,7 @@
   <xacro:arg name="tag_id" default="0" />
   <xacro:arg name="radius" default="0.024165" />
   <xacro:arg name="height" default="0.0813" />
-  <xacro:arg name="mass" default="0.15" />
+  <xacro:arg name="mass" default="0.15" /> <!-- sim.launch.py draws 0.15-0.30 per jar -->
   <xacro:arg name="tag_size" default="0.02" />
 
   <xacro:property name="r" value="$(arg radius)" />

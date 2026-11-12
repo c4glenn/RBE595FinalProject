@@ -16,7 +16,7 @@
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>shape_msgs</exec_depend>
   <exec_depend>tf2_ros</exec_depend>
-  <exec_depend>kinova_gen3_7dof_robotiq_2f_85_moveit_config</exec_depend>
+  <exec_depend>kinova_gen3_lite_moveit_config</exec_depend>
   <exec_depend>moveit_configs_utils</exec_depend>
   <exec_depend>moveit_ros_move_group</exec_depend>
 

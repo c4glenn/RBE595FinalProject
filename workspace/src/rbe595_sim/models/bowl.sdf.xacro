@@ -16,9 +16,10 @@
 -->
 <sdf xmlns:xacro="http://ros.org/wiki/xacro" version="1.9">
   <xacro:arg name="name" default="bowl" />
-  <xacro:arg name="radius" default="0.09" />
-  <xacro:arg name="height" default="0.06" />
-  <xacro:arg name="wall" default="0.008" />
+  <!-- defaults: a standard cereal/soup bowl, ~15 cm across and ~6.5 cm tall -->
+  <xacro:arg name="radius" default="0.075" />
+  <xacro:arg name="height" default="0.065" />
+  <xacro:arg name="wall" default="0.005" />
   <xacro:arg name="segments" default="24" />
 
   <xacro:property name="r" value="$(arg radius)" />

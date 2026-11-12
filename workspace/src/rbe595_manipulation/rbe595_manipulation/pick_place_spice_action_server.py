@@ -7,7 +7,7 @@ from rclpy.node import Node
 from rbe595_manipulation.arm_client import ArmMoveClient
 from rbe595_manipulation.context import StepContext
 from rbe595_manipulation.gripper_client import GripperClient
-from rbe595_manipulation.scene_setup import add_known_obstacles
+from rbe595_manipulation.scene_setup import BottleScene, add_known_obstacles
 from rbe595_manipulation.steps import (
     step1_go_to_rack,
     step2_grasp_top,
@@ -43,6 +43,7 @@ class PickPlaceSpiceActionServer(Node):
         self._ctx = StepContext(
             arm=ArmMoveClient(self),
             gripper=GripperClient(self),
+            bottle=BottleScene(self),
             logger=self.get_logger(),
         )
         self._server = ActionServer(
