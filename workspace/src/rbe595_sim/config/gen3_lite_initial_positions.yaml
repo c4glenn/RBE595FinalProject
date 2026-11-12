@@ -1,0 +1,12 @@
+# Joint angles [rad] the simulated Gen3 lite starts in (kinova.urdf.xacro initial_positions_file).
+# This is the real arm's home pose: end_effector_link at (0.329, -0.017, 0.391) in base_link,
+# pointing straight down (rbe_vbm_test config/views.yaml, home), solved by IK on the Gen3 lite
+# URDF. All zeros would leave the arm standing straight up.
+# joint_7 is unused on the 6 DoF arm but the xacro expects the key.
+joint_1: 0.1448
+joint_2: -0.2924
+joint_3: 1.3355
+joint_4: -1.5452
+joint_5: -1.5339
+joint_6: -1.3932
+joint_7: 0.0

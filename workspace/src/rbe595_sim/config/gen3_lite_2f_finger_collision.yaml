@@ -1,0 +1,28 @@
+# Gazebo-only collision boxes for the gen3_lite_2f fingers, in each finger link's own frame.
+#
+# kortex_description gives every finger link a 13k-17k triangle mesh collision. Under
+# gz-physics bullet-featherstone, mesh-on-bottle contact while holding a jar drops the sim to
+# ~0.1x real time, so sim.launch.py swaps each finger's mesh collision for these boxes
+# (visuals and MoveIt's planning model keep the meshes). Each finger is split into three
+# slices along its length (link x); each box is the bounding box of the mesh in that slice.
+
+# Friction coefficient of the finger collisions (bullet multiplies it with the bottle's 1.0).
+friction: 3.0
+
+links:
+  right_finger_prox_link:
+    - {xyz: [-0.0380, 0.0099, 0.0001], size: [0.0176, 0.0276, 0.0235]}
+    - {xyz: [-0.0204, 0.0009, 0.0001], size: [0.0175, 0.0333, 0.0222]}
+    - {xyz: [-0.0027, -0.0030, 0.0001], size: [0.0174, 0.0256, 0.0241]}
+  right_finger_dist_link:
+    - {xyz: [-0.0363, 0.0048, 0.0000], size: [0.0145, 0.0106, 0.0219]}
+    - {xyz: [-0.0215, 0.0013, -0.0000], size: [0.0141, 0.0143, 0.0224]}
+    - {xyz: [-0.0072, -0.0018, 0.0000], size: [0.0145, 0.0164, 0.0236]}
+  left_finger_prox_link:
+    - {xyz: [-0.0380, -0.0099, 0.0001], size: [0.0176, 0.0276, 0.0235]}
+    - {xyz: [-0.0204, -0.0009, 0.0001], size: [0.0175, 0.0333, 0.0222]}
+    - {xyz: [-0.0027, 0.0030, 0.0001], size: [0.0174, 0.0256, 0.0241]}
+  left_finger_dist_link:
+    - {xyz: [-0.0363, -0.0048, -0.0000], size: [0.0145, 0.0106, 0.0219]}
+    - {xyz: [-0.0215, -0.0013, 0.0000], size: [0.0141, 0.0143, 0.0224]}
+    - {xyz: [-0.0072, 0.0018, 0.0000], size: [0.0145, 0.0164, 0.0236]}
