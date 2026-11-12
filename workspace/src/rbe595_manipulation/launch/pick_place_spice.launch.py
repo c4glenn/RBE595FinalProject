@@ -15,7 +15,7 @@ def generate_launch_description():
         parameters=[
             moveit_config.to_dict(),
             {
-                "use_sim_time": True,
+                "use_sim_time": False,
                 "publish_robot_description_semantic": True,
                 "allow_trajectory_execution": True,
                 "publish_planning_scene": True,

@@ -18,7 +18,7 @@ from rbe595_manipulation._orientation import rpy_to_quaternion
 from rbe595_manipulation._wait import wait_for_future
 from rbe595_manipulation.poses import DEFAULT_VELOCITY_SCALING
 
-PLANNING_GROUP = "manipulator"
+PLANNING_GROUP = "arm"
 END_EFFECTOR_LINK = "end_effector_link"
 POSITION_TOLERANCE_M = 0.01
 ORIENTATION_TOLERANCE_RAD = 0.05

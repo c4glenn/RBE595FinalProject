@@ -24,6 +24,7 @@ setup(
         "console_scripts": [
             "pick_place_spice_action_server = "
             "rbe595_manipulation.pick_place_spice_action_server:main",
+            "test_shake = rbe595_manipulation.test_shake:main",
         ],
     },
 )
