@@ -31,6 +31,11 @@
   <xacro:property name="r" value="$(arg radius)" />
   <xacro:property name="h" value="$(arg height)" />
   <xacro:property name="m" value="$(arg mass)" />
+  <!-- Square foot under the body (see body_collision): inside the base circle, 2 mm thick,
+       the body starting foot_lift above the base so only the foot touches what it stands on. -->
+  <xacro:property name="foot_w" value="${1.4 * r}" />
+  <xacro:property name="foot_t" value="0.002" />
+  <xacro:property name="foot_lift" value="0.0005" />
   <xacro:property name="tag_size" value="$(arg tag_size)" />
   <!-- gap between the cap's centreline and the tag's near edge, clear of the cutout -->
   <xacro:property name="tag_gap" value="0.001" />
@@ -50,9 +55,22 @@
         </inertia>
       </inertial>
 
+      <!-- Body, stopping foot_lift above the base, and a square foot under it that the bottle
+           stands on. Under gz-physics bullet-featherstone a cylinder's flat end standing on a
+           small static collision (a rack pocket floor, the regrasp stand's column top) never
+           settles: it rocks and tips over by itself. Box-on-box contact settles. -->
       <collision name="body_collision">
-        <pose>0 0 ${h / 2} 0 0 0</pose>
-        <geometry><cylinder><radius>${r}</radius><length>${h}</length></cylinder></geometry>
+        <pose>0 0 ${foot_lift + (h - foot_lift) / 2} 0 0 0</pose>
+        <geometry><cylinder><radius>${r}</radius><length>${h - foot_lift}</length></cylinder></geometry>
+        <surface>
+          <friction>
+            <ode><mu>1.0</mu><mu2>1.0</mu2></ode>
+          </friction>
+        </surface>
+      </collision>
+      <collision name="foot_collision">
+        <pose>0 0 ${foot_t / 2} 0 0 0</pose>
+        <geometry><box><size>${foot_w} ${foot_w} ${foot_t}</size></box></geometry>
         <surface>
           <friction>
             <ode><mu>1.0</mu><mu2>1.0</mu2></ode>

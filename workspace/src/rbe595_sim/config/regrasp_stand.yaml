@@ -1,0 +1,24 @@
+# Regrasp stand, shared by models/regrasp_stand.sdf.xacro and sim.launch.py. Numbers come from the
+# printed stand's parametric CAD (spice_rack.py build_regrasp_stand(), exported to
+# meshes/regrasp_stand.stl): a 136 x 100 x 6 mm base plate with a 55 mm column on it, a 20 mm
+# pocket in the column top that the jar stands in, and a tag pad on the plate beside the column.
+# The pocket is a rack pocket and takes the rack's sizes (spice_rack.yaml cell / cell_mouth /
+# pocket_depth): with the CAD's 50 mm bore the 48.3 mm sim jar has 0.8 mm play a side, which
+# bullet's contact margin eats, and the wall tips a jar standing in it.
+#
+# Stand frame: origin on the table under the column's centre, +x from the column towards the tag
+# pad, +z up. The CAD uses a corner origin instead (plate corner at (0, 0, 0)), with the column
+# centre at (50, 50) mm and the tag centre at (108, 50) mm.
+plate_size: [0.136, 0.100, 0.006]   # base plate along x, y, and its thickness [m]
+plate_center_x: 0.018               # plate centre from the column centre along x [m]
+column_radius: 0.032                # pocket mouth radius + 3 mm rim [m]
+column_height: 0.055                # from the plate top to the column top [m]
+pocket_depth: 0.020                 # column top down to the pocket floor (jar seat) [m]
+pocket_diameter: 0.051              # pocket bore, as the rack's cell in spice_rack.yaml [m]
+pocket_mouth: 0.059                 # pocket diameter at the rim after the 4 mm 45 deg lead-in [m]
+# Datum tag: a tag36h11 sticker in a 0.4 mm recess in the plate top. tag_size is the black-border
+# edge; the tag image's right (+x) points along the stand's -x, from the tag back to the column
+# (stick the real one the same way: rbe595_manipulation finds the stand's yaw from it).
+tag_id: 8
+tag_size: 0.036
+tag_x: 0.058                        # tag centre from the column centre along x [m]

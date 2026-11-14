@@ -1,0 +1,26 @@
+# Wrist camera: a RealSense D405 on a printed bracket at the Gen3 lite's wrist, beside the
+# gen3_lite_2f gripper, looking the same way as the fingers (eye-in-hand).
+#
+# Mount: camera_link pose in end_effector_link (the tool flange the gripper is bolted to; its
+# +z is the approach direction, the fingers close along its y). camera_link follows the
+# RealSense convention: +x out of the lens, +z up on the image. Here it sits off to the side of
+# the gripper body (which is 66 mm across in x, 89 mm in y), on its +x side: across the finger
+# closing direction, so the fingers stay out of its view of what lies straight ahead of them;
+# on the outside of the gripper (away from the robot) in the start pose; and on top in the side
+# grasp (side_grasp_rpy turns end-effector +x up), where it would otherwise hit the table.
+# From a photo of the real mount: the D405's top is flush with the bottom of the wrist collar
+# (the flange), its lens face 23 mm further down towards the fingers, and its inner side against
+# the gripper body. Measure it on the robot and update (a mount error goes 1:1 into the grasp).
+mount_xyz: [0.055, 0.0, 0.023]
+mount_rpy: [0.0, -1.57079632679, 3.14159265359]   # +x along the approach, image up along +x
+
+# D405 body (42 x 42 x 23 mm), drawn behind the lens face; also its collision
+body_size: [0.023, 0.042, 0.042]   # along camera_link x (depth), y, z
+
+# Colour stream as used on the real camera: 1280 x 720, 87 deg x 58 deg field of view
+width: 1280
+height: 720
+horizontal_fov: 1.518   # 87 deg
+update_rate: 15
+# gz topic; camera_info goes to its sibling topic wrist_camera/camera_info
+topic: wrist_camera/image

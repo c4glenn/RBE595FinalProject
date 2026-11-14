@@ -90,16 +90,18 @@ def top_grasp_rpy(yaw: float) -> Tuple[float, float, float]:
 def side_grasp_rpy(heading: float, tilt: float = 0.0) -> Tuple[float, float, float]:
     """Gripper approaching horizontally along world `heading`, fingers closing horizontally
     (end-effector y axis horizontal), so a standing bottle is held by its sides. The bottle's
-    axis then lies along the end-effector x axis.
+    axis then lies along the end-effector x axis, with +x (the wrist camera's side) up, so the
+    camera rides on top of the gripper rather than under it, against the table.
 
     `tilt` turns the gripper about its own approach axis, which tips the held bottle over
     sideways about the grasp point without moving the end-effector origin -- that is the pour.
     """
-    # R = Rz(heading) * Ry(pi/2) * Rz(tilt): Ry(pi/2) points the approach (+z) along world +x
-    # with the fingers along world y; Rz(tilt) then rotates about that approach axis.
+    # R = Rz(heading) * Ry(pi/2) * Rz(pi + tilt): Ry(pi/2) points the approach (+z) along world
+    # +x with the fingers along world y; Rz(pi) turns end-effector +x up; Rz(tilt) then rotates
+    # about that approach axis.
     ch, sh = math.cos(heading), math.sin(heading)
-    ct, st = math.cos(tilt), math.sin(tilt)
-    # Ry(pi/2) * Rz(tilt) = [[0, 0, 1], [st, ct, 0], [-ct, st, 0]]
+    ct, st = -math.cos(tilt), -math.sin(tilt)  # cos and sin of pi + tilt
+    # Ry(pi/2) * Rz(a) = [[0, 0, 1], [sin a, cos a, 0], [-cos a, sin a, 0]]
     a = [[0.0, 0.0, 1.0], [st, ct, 0.0], [-ct, st, 0.0]]
     rz = [[ch, -sh, 0.0], [sh, ch, 0.0], [0.0, 0.0, 1.0]]
     m = [[sum(rz[i][k] * a[k][j] for k in range(3)) for j in range(3)] for i in range(3)]

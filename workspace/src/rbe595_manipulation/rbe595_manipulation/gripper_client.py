@@ -48,6 +48,11 @@ class GripperClient:
             return False
         return True
 
+    def holding(self, holding_max: float) -> bool:
+        """After a grasp: the fingers are still stopped by something between them. A jar that
+        slipped out lets them close the rest of the way, past `holding_max`."""
+        return self._finger_position is not None and self._finger_position < holding_max
+
     def move_to(
         self, position: float, timeout_s: float = 5.0, result_timeout_s: float = 15.0
     ) -> bool:

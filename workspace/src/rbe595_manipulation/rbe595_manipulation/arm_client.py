@@ -84,7 +84,27 @@ class ArmMoveClient:
         """Move the end effector in a straight line from where it is to (position_xyz, rpy)
         (world frame), keeping clear of the planning scene -- for the short approach, grasp,
         place and retreat legs, where a free-space plan could swing the fingers into the
-        bottle."""
+        bottle.
+
+        Retried once on CONTROL_FAILED, as move_to() is: the path is planned from the measured
+        state, and an arm still settling from the previous move (a shake, a bottle let go) can
+        have moved on by the time it is executed."""
+        error_code = self._linear_once(position_xyz, rpy, velocity_scaling, timeout_s)
+        if error_code == MoveItErrorCodes.CONTROL_FAILED:
+            self._node.get_logger().warn(
+                "straight-line move CONTROL_FAILED, retrying once after settling"
+            )
+            time.sleep(SETTLE_TIME_S)
+            error_code = self._linear_once(position_xyz, rpy, velocity_scaling, timeout_s)
+        if error_code != MoveItErrorCodes.SUCCESS:
+            return False
+        time.sleep(SETTLE_TIME_S)
+        return True
+
+    def _linear_once(self, position_xyz, rpy, velocity_scaling, timeout_s) -> int:
+        """One plan-and-execute of a straight-line move; returns the MoveIt error code
+        (FAILURE when it could not be planned or sent)."""
+        failure = MoveItErrorCodes.FAILURE
         request = GetCartesianPath.Request()
         request.header.frame_id = "base_link"
         request.start_state.is_diff = True
@@ -102,42 +122,44 @@ class ArmMoveClient:
 
         if not self._cartesian.wait_for_service(timeout_sec=timeout_s):
             self._node.get_logger().error("compute_cartesian_path service not available")
-            return False
+            return failure
         future = self._cartesian.call_async(request)
         if not wait_for_future(future, timeout_s) or future.result() is None:
             self._node.get_logger().error("compute_cartesian_path call timed out")
-            return False
+            return failure
         response = future.result()
+        # Checked first: a path blocked from the start (e.g. the start state in collision) also
+        # comes back as a single point, with fraction 0.
         if response.fraction < CARTESIAN_MIN_FRACTION:
             self._node.get_logger().error(
                 f"straight-line move only {response.fraction:.0%} achievable "
                 f"(error_code={response.error_code.val})"
             )
-            return False
+            return failure
+        if len(response.solution.joint_trajectory.points) < 2:
+            return MoveItErrorCodes.SUCCESS  # already there
 
         if not self._execute.wait_for_server(timeout_sec=timeout_s):
             self._node.get_logger().error("execute_trajectory action server not available")
-            return False
+            return failure
         goal = ExecuteTrajectory.Goal()
         goal.trajectory = response.solution
         send_future = self._execute.send_goal_async(goal)
         if not wait_for_future(send_future, timeout_s):
             self._node.get_logger().error("execute_trajectory goal send timed out")
-            return False
+            return failure
         goal_handle = send_future.result()
         if goal_handle is None or not goal_handle.accepted:
             self._node.get_logger().error("execute_trajectory goal rejected")
-            return False
+            return failure
         result_future = goal_handle.get_result_async()
         if not wait_for_future(result_future, timeout_s) or result_future.result() is None:
             self._node.get_logger().error("execute_trajectory result timed out")
-            return False
+            return failure
         error_code = result_future.result().result.error_code.val
         if error_code != MoveItErrorCodes.SUCCESS:
             self._node.get_logger().error(f"execute_trajectory failed: error_code={error_code}")
-            return False
-        time.sleep(SETTLE_TIME_S)
-        return True
+        return error_code
 
     def move_to(
         self,
@@ -145,13 +167,19 @@ class ArmMoveClient:
         rpy: Sequence[float],
         velocity_scaling: float = DEFAULT_VELOCITY_SCALING,
         timeout_s: float = 60.0,
+        refine: bool = True,
     ) -> bool:
         """position_xyz is in rbe595_sim's world frame (see poses.py); converted to base_link
         (MoveIt's actual planning frame) before building the goal -- see ARM_BASE_WORLD_XYZ.
 
         Retried once on CONTROL_FAILED: letting go of (or setting down) a bottle can nudge the
         arm after the previous move finished, so the new plan's start point no longer matches
-        the measured joint state."""
+        the measured joint state.
+
+        refine: finish with a straight-line move to the exact pose. The planner only lands
+        within POSITION_TOLERANCE_M / ORIENTATION_TOLERANCE_RAD of it, and the straight
+        descent that usually follows keeps that error: with a bottle in hand, a few mm of it
+        is enough to set the bottle down on a rack pocket's rim instead of in the pocket."""
         error_code = self._move_once(position_xyz, rpy, velocity_scaling, timeout_s)
         if error_code == MoveItErrorCodes.CONTROL_FAILED:
             self._node.get_logger().warn("move_group CONTROL_FAILED, retrying once after settling")
@@ -161,6 +189,8 @@ class ArmMoveClient:
             self._node.get_logger().error(f"move_group failed: error_code={error_code}")
             return False
         time.sleep(SETTLE_TIME_S)
+        if refine:
+            return self.move_linear(position_xyz, rpy, velocity_scaling, timeout_s)
         return True
 
     def _move_once(self, position_xyz, rpy, velocity_scaling, timeout_s) -> int:

@@ -35,6 +35,15 @@ BOWL_WALL = 0.005
 BOWL_REACH = (0.35, 0.65)
 BOWL_RACK_CLEARANCE = 0.05  # rim to rack, room for the gripper fingers
 BOWL_EDGE_MARGIN = 0.02     # rim to table edge
+# Regrasp stand (models/regrasp_stand.sdf.xacro): its column centred on the staging spot
+# (rbe595_manipulation poses.STAGING_XY), 0.5 m from the arm base, turned so its tag pad points
+# 90 deg left of the base -> stand direction. The side grasp then comes in from the base side
+# across the plate's short edge, and from above the stand the wrist camera (on the gripper's
+# outer side) sits right over the tag.
+STAND_XY = (0.0, 0.30)
+STAND_YAW = math.atan2(STAND_XY[1] - 0.0, STAND_XY[0] - (-0.4)) + math.pi / 2  # base at the x/y defaults
+# Bowl rim to the stand column's centre: clears the plate (it reaches 0.10 m from the column).
+BOWL_STAND_CLEARANCE = 0.11
 # Spice jar mass range [kg]: the real jar is not weighed yet; somewhere between empty and full.
 BOTTLE_MASS_RANGE = ("0.15", "0.30")
 
@@ -74,6 +83,63 @@ def grasp_assist_plugins(bottles):
         "</gazebo>"
         for b in bottles
     )
+
+
+def load_wrist_camera_cfg():
+    cfg_file = os.path.join(get_package_share_directory("rbe595_sim"), "config", "wrist_camera.yaml")
+    with open(cfg_file) as f:
+        return yaml.safe_load(f)
+
+
+def wrist_camera_urdf(cfg):
+    """camera_link (RealSense convention: +x out of the lens) fixed to end_effector_link where
+    config/wrist_camera.yaml mounts it, with the D405 body behind the lens, and
+    camera_color_optical_frame (+z out of the lens, +x right, +y down on the image), the frame
+    the images are in. Plus the gz camera sensor, which looks along camera_link +x."""
+    xyz = " ".join(map(str, cfg["mount_xyz"]))
+    rpy = " ".join(map(str, cfg["mount_rpy"]))
+    size = " ".join(map(str, cfg["body_size"]))
+    body = f'<origin xyz="{-cfg["body_size"][0] / 2} 0 0" rpy="0 0 0"/><geometry><box size="{size}"/></geometry>'
+    return (
+        '<link name="camera_link">'
+        f'<visual>{body}<material name="d405_grey"><color rgba="0.6 0.6 0.62 1"/></material></visual>'
+        f"<collision>{body}</collision>"
+        '<inertial><mass value="0.06"/><inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/></inertial>'
+        "</link>"
+        '<joint name="camera_mount_joint" type="fixed">'
+        f'<parent link="end_effector_link"/><child link="camera_link"/><origin xyz="{xyz}" rpy="{rpy}"/>'
+        "</joint>"
+        '<link name="camera_color_optical_frame"/>'
+        '<joint name="camera_color_optical_joint" type="fixed">'
+        '<parent link="camera_link"/><child link="camera_color_optical_frame"/>'
+        f'<origin xyz="0 0 0" rpy="{-math.pi / 2} 0 {-math.pi / 2}"/>'
+        "</joint>"
+        '<gazebo reference="camera_link">'
+        '<sensor name="wrist_camera" type="camera">'
+        f'<topic>{cfg["topic"]}</topic>'
+        f'<update_rate>{cfg["update_rate"]}</update_rate>'
+        "<always_on>true</always_on>"
+        "<camera>"
+        f'<horizontal_fov>{cfg["horizontal_fov"]}</horizontal_fov>'
+        f'<image><width>{cfg["width"]}</width><height>{cfg["height"]}</height><format>R8G8B8</format></image>'
+        "<clip><near>0.02</near><far>3</far></clip>"
+        "</camera>"
+        "</sensor>"
+        "</gazebo>"
+    )
+
+
+class WristCameraDescription(Substitution):
+    """The robot URDF with the wrist camera (wrist_camera_urdf()) added, for both
+    robot_state_publisher (so the camera frames are on /tf) and Gazebo."""
+
+    def __init__(self, description):
+        super().__init__()
+        self.description = description
+
+    def perform(self, context):
+        urdf = self.description.perform(context)
+        return urdf.replace("</robot>", wrist_camera_urdf(load_wrist_camera_cfg()) + "</robot>")
 
 
 class GazeboRobotDescription(Substitution):
@@ -127,9 +193,9 @@ def spawn_spice_bottle(name, tag_id, x, y, z=0.75, mass=0.15):
     sdf = Command(
         [
             PathJoinSubstitution([FindExecutable(name="xacro")]),
-            " ",
+            ' "',
             PathJoinSubstitution([FindPackageShare("rbe595_sim"), "models", "spice_bottle.sdf.xacro"]),
-            f" name:={name} tag_id:={tag_id} mass:={mass}",
+            f'" name:={name} tag_id:={tag_id} mass:={mass}',
         ]
     )
     return Node(
@@ -145,9 +211,28 @@ def spawn_spice_rack(name, x, y, z=0.75, yaw=0.0):
     sdf = Command(
         [
             PathJoinSubstitution([FindExecutable(name="xacro")]),
-            " ",
+            ' "',
             PathJoinSubstitution([FindPackageShare("rbe595_sim"), "models", "spice_rack.sdf.xacro"]),
-            f" name:={name}",
+            f'" name:={name}',
+        ]
+    )
+    return Node(
+        package="ros_gz_sim",
+        executable="create",
+        output="screen",
+        arguments=["-string", sdf, "-x", str(x), "-y", str(y), "-z", str(z), "-Y", str(yaw)],
+    )
+
+
+def spawn_regrasp_stand(name, x, y, z=0.75, yaw=0.0):
+    """Spawn the regrasp stand (models/regrasp_stand.sdf.xacro), its column centred over (x, y) on
+    the table at height z, its tag pad along `yaw`."""
+    sdf = Command(
+        [
+            PathJoinSubstitution([FindExecutable(name="xacro")]),
+            ' "',
+            PathJoinSubstitution([FindPackageShare("rbe595_sim"), "models", "regrasp_stand.sdf.xacro"]),
+            f'" name:={name}',
         ]
     )
     return Node(
@@ -163,9 +248,9 @@ def spawn_bowl(name, x, y, z=0.75):
     sdf = Command(
         [
             PathJoinSubstitution([FindExecutable(name="xacro")]),
-            " ",
+            ' "',
             PathJoinSubstitution([FindPackageShare("rbe595_sim"), "models", "bowl.sdf.xacro"]),
-            f" name:={name} radius:={BOWL_RADIUS} height:={BOWL_HEIGHT} wall:={BOWL_WALL}",
+            f'" name:={name} radius:={BOWL_RADIUS} height:={BOWL_HEIGHT} wall:={BOWL_WALL}',
         ]
     )
     return Node(
@@ -203,7 +288,8 @@ def spice_rack_slots(x, y, z=0.75, yaw=0.0):
 
 
 def random_bowl_position(rng, base_x, base_y, rack_x, rack_y):
-    """A random (x, y) for the bowl centre: on the table, within reach of the arm, clear of the rack.
+    """A random (x, y) for the bowl centre: on the table, within reach of the arm, clear of the rack
+    and of the regrasp stand.
 
     Assumes an unrotated rack (yaw = 0).
     """
@@ -230,6 +316,8 @@ def random_bowl_position(rng, base_x, base_y, rack_x, rack_y):
         pdy = max(abs(by - rack_y) - pad_half, 0.0)
         if math.hypot(pdx, pdy) < BOWL_RADIUS:
             continue
+        if math.hypot(bx - STAND_XY[0], by - STAND_XY[1]) - BOWL_RADIUS < BOWL_STAND_CLEARANCE:
+            continue
         return bx, by
     raise RuntimeError("no valid bowl position; check the arm base and rack poses")
 
@@ -253,18 +341,24 @@ def spawn_random_bowl(context, rack_x, rack_y):
 def spawn_spice_bottles(context, names, slots):
     """One bottle per rack slot, each with its own mass drawn from [bottle_mass_min,
     bottle_mass_max] (or all bottle_mass, if set). Spawned 1 mm above the slot floor so they do
-    not start in contact with the rack."""
+    not start in contact with the rack.
+
+    Cap tag IDs are 0.. in slot order S0.., or, with shuffle_tags:=true, in a random order, so
+    which jar is where has to be found from the tags."""
     fixed = LaunchConfiguration("bottle_mass").perform(context)
     low = float(LaunchConfiguration("bottle_mass_min").perform(context))
     high = float(LaunchConfiguration("bottle_mass_max").perform(context))
     seed = LaunchConfiguration("seed").perform(context)
-    # Its own stream, so the bowl position for a given seed does not change with it.
+    # Their own streams, so the bowl position for a given seed does not change with them.
     rng = random.Random(f"bottle_mass/{seed}" if seed else None)
+    tag_ids = list(range(len(slots)))
+    if LaunchConfiguration("shuffle_tags").perform(context) == "true":
+        random.Random(f"tag_order/{seed}" if seed else None).shuffle(tag_ids)
     actions = []
-    for i, (name, (sx, sy, sz)) in enumerate(zip(names, slots)):
+    for i, (name, tag_id, (sx, sy, sz)) in enumerate(zip(names, tag_ids, slots)):
         mass = float(fixed) if fixed else rng.uniform(low, high)
-        actions.append(LogInfo(msg=f"{name} mass {mass * 1000:.0f} g"))
-        actions.append(spawn_spice_bottle(name, tag_id=i, x=sx, y=sy, z=sz + 0.001, mass=f"{mass:.4f}"))
+        actions.append(LogInfo(msg=f"{name} in slot S{i}: tag {tag_id}, mass {mass * 1000:.0f} g"))
+        actions.append(spawn_spice_bottle(name, tag_id=tag_id, x=sx, y=sy, z=sz + 0.001, mass=f"{mass:.4f}"))
     return actions
 
 
@@ -284,34 +378,42 @@ def generate_launch_description():
         [FindPackageShare("kortex_description"), "arms/gen3_lite/6dof/config/ros2_controllers.yaml"]
     )
 
+    # Every file path below goes through a command line, so it is quoted: the workspace may sit
+    # in a folder whose name has spaces.
     robot_description_content = Command(
         [
             PathJoinSubstitution([FindExecutable(name="xacro")]),
-            " ",
+            ' "',
             PathJoinSubstitution(
                 [FindPackageShare("kortex_description"), "robots", "kinova.urdf.xacro"]
             ),
-            " robot_ip:=xxx.yyy.zzz.www",
+            '" robot_ip:=xxx.yyy.zzz.www',
             " name:=", robot_name,
             " arm:=gen3_lite",
             " dof:=6",
             " vision:=false",
             " prefix:=''",
             " sim_gazebo:=true",
-            " simulation_controllers:=", controllers_file,
+            ' simulation_controllers:="', controllers_file, '"',
             " gripper:=", gripper,
             # Start in the real arm's home pose rather than all zeros (straight up).
-            " initial_positions_file:=",
+            ' initial_positions_file:="',
             PathJoinSubstitution(
                 [FindPackageShare("rbe595_sim"), "config", "gen3_lite_initial_positions.yaml"]
             ),
+            '"',
         ]
     )
 
+    # Plus the D405 wrist camera (config/wrist_camera.yaml), for robot_state_publisher and Gazebo.
+    robot_description_with_camera = WristCameraDescription(robot_description_content)
+
     world = PathJoinSubstitution([FindPackageShare("rbe595_sim"), "worlds", "table_world.sdf"])
 
-    # Rack centred 0.5 m in front of the arm base: every slot is within 0.65 m of it.
-    rack_x, rack_y = 0.1, 0.0
+    # Rack centred 0.4 m in front of the arm base. Pointing straight down, the Gen3 lite's hand
+    # reaches only ~0.52 m from the base at grasp height (MoveIt IK), and less 10 cm higher for
+    # the approach above a jar: at 0.5 m the rack's far column (0.56 m out) cannot be picked.
+    rack_x, rack_y = 0.0, 0.0
     # A bottle in every slot, tag IDs 0.. matching the S0..S5 slot numbering from
     # spice_rack_slots(); see spawn_spice_bottles().
     slots = spice_rack_slots(rack_x, rack_y)
@@ -342,6 +444,9 @@ def generate_launch_description():
             DeclareLaunchArgument("bottle_mass", default_value=""),
             DeclareLaunchArgument("bottle_mass_min", default_value=BOTTLE_MASS_RANGE[0]),
             DeclareLaunchArgument("bottle_mass_max", default_value=BOTTLE_MASS_RANGE[1]),
+            # Put the jars (cap tags 0-5) in the slots in a random order (from seed) instead of
+            # tag i in slot Si.
+            DeclareLaunchArgument("shuffle_tags", default_value="false", choices=["true", "false"]),
             IncludeLaunchDescription(
                 PythonLaunchDescriptionSource(
                     [FindPackageShare("ros_gz_sim"), "/launch/gz_sim.launch.py"]
@@ -350,7 +455,7 @@ def generate_launch_description():
                     "gz_args": [
                         "-r -v 3 ",
                         PythonExpression(["'-s --headless-rendering ' if '", headless, "' == 'true' else ''"]),
-                        world,
+                        '"', world, '"',
                         " --physics-engine gz-physics-bullet-featherstone-plugin",
                     ]
                 }.items(),
@@ -360,13 +465,14 @@ def generate_launch_description():
                 executable="create",
                 output="screen",
                 arguments=[
-                    "-string", GazeboRobotDescription(robot_description_content, bottle_names),
+                    "-string", GazeboRobotDescription(robot_description_with_camera, bottle_names),
                     "-name", robot_name,
                     "-allow_renaming", "true",
                     "-x", x, "-y", y, "-z", z,
                 ],
             ),
             spawn_spice_rack("spice_rack", x=rack_x, y=rack_y),
+            spawn_regrasp_stand("regrasp_stand", x=STAND_XY[0], y=STAND_XY[1], yaw=STAND_YAW),
             spice_bottles,
             OpaqueFunction(function=spawn_random_bowl, args=[rack_x, rack_y]),
             # Sim only: backs the physical grasp with a fixed joint (see scripts/grasp_assist.py).
@@ -383,7 +489,7 @@ def generate_launch_description():
                 executable="robot_state_publisher",
                 output="both",
                 parameters=[
-                    {"robot_description": ParameterValue(robot_description_content, value_type=str)},
+                    {"robot_description": ParameterValue(robot_description_with_camera, value_type=str)},
                     {"use_sim_time": True},
                 ],
             ),
@@ -394,6 +500,8 @@ def generate_launch_description():
                     "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
                     "/scene_camera/image@sensor_msgs/msg/Image[gz.msgs.Image",
                     "/scene_camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo",
+                    "/wrist_camera/image@sensor_msgs/msg/Image[gz.msgs.Image",
+                    "/wrist_camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo",
                 ],
                 output="screen",
             ),

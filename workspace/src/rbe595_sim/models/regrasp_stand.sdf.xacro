@@ -1,0 +1,116 @@
+<?xml version="1.0"?>
+<!--
+  Regrasp stand: where the jar is set down to switch between the top grasp (rack) and the side
+  grasp (pour). It lifts the jar 41 mm off the table, so the horizontal wrist of a side grasp
+  clears the table. Layout in config/regrasp_stand.yaml.
+
+  Visual: the stand's own CAD export, meshes/regrasp_stand.stl (mm, corner origin).
+
+  Collision: plain shapes, not the mesh, like models/spice_rack.sdf.xacro: the plate as a box, the
+  column up to the pocket floor as the square box inscribed in it, and the pocket wall as a ring
+  of vertical pieces at the bore radius with a ring of 45 deg pieces above them following the
+  lead-in to the mouth, which steer a jar set down slightly off-centre into the bore.
+
+  A tag36h11 datum tag sits in the plate beside the column, for locating the stand.
+
+  Arguments:
+    name   model name (must be unique in the world)
+-->
+<sdf xmlns:xacro="http://ros.org/wiki/xacro" version="1.9">
+  <xacro:arg name="name" default="regrasp_stand" />
+
+  <xacro:property name="cfg" value="${xacro.load_yaml('$(find rbe595_sim)/config/regrasp_stand.yaml')}" />
+  <xacro:property name="plate" value="${cfg['plate_size']}" />
+  <xacro:property name="plate_cx" value="${cfg['plate_center_x']}" />
+  <xacro:property name="col_r" value="${cfg['column_radius']}" />
+  <xacro:property name="col_h" value="${cfg['column_height']}" />
+  <xacro:property name="pocket_depth" value="${cfg['pocket_depth']}" />
+  <xacro:property name="bore" value="${cfg['pocket_diameter']}" />
+  <xacro:property name="mouth" value="${cfg['pocket_mouth']}" />
+  <xacro:property name="tag_id" value="${cfg['tag_id']}" />
+  <xacro:property name="tag_size" value="${cfg['tag_size']}" />
+  <xacro:property name="tag_x" value="${cfg['tag_x']}" />
+
+  <xacro:property name="plate_t" value="${plate[2]}" />
+  <xacro:property name="top_z" value="${plate_t + col_h}" />
+  <xacro:property name="seat_z" value="${top_z - pocket_depth}" />
+  <xacro:property name="chamfer" value="${(mouth - bore) / 2}" />
+  <xacro:property name="bore_depth" value="${pocket_depth - chamfer}" />
+
+  <!-- Pocket wall ring, as in spice_rack.sdf.xacro -->
+  <xacro:property name="seg_t" value="0.005" />
+  <xacro:property name="n_seg" value="16" />
+  <xacro:property name="r_bore" value="${bore / 2 + seg_t / 2}" />
+  <xacro:property name="bore_seg_len" value="${2 * (bore / 2 + seg_t) * tan(pi / n_seg)}" />
+  <xacro:property name="r_chamfer" value="${(bore + mouth) / 4 + seg_t / (2 * sqrt(2))}" />
+  <xacro:property name="z_chamfer" value="${top_z - chamfer / 2 - seg_t / (2 * sqrt(2))}" />
+  <xacro:property name="chamfer_seg_len" value="${2 * (mouth / 2 + seg_t) * tan(pi / n_seg)}" />
+
+  <xacro:macro name="collision_box" params="name x y z sx sy sz yaw:=0 pitch:=0">
+    <collision name="${name}_collision">
+      <pose>${x} ${y} ${z} 0 ${pitch} ${yaw}</pose>
+      <geometry><box><size>${sx} ${sy} ${sz}</size></box></geometry>
+    </collision>
+  </xacro:macro>
+
+  <xacro:macro name="pocket_ring" params="i">
+    <xacro:if value="${i &lt; n_seg}">
+      <xacro:property name="a" value="${2 * pi * i / n_seg}" />
+      <xacro:collision_box name="bore_${i}"
+                 x="${r_bore * cos(a)}" y="${r_bore * sin(a)}" z="${seat_z + bore_depth / 2}"
+                 sx="${seg_t}" sy="${bore_seg_len}" sz="${bore_depth}" yaw="${a}" />
+      <xacro:collision_box name="chamfer_${i}"
+                 x="${r_chamfer * cos(a)}" y="${r_chamfer * sin(a)}" z="${z_chamfer}"
+                 sx="${seg_t}" sy="${chamfer_seg_len}" sz="${chamfer * sqrt(2)}"
+                 yaw="${a}" pitch="${pi / 4}" />
+      <xacro:pocket_ring i="${i + 1}" />
+    </xacro:if>
+  </xacro:macro>
+
+  <model name="$(arg name)">
+    <static>true</static>
+    <link name="link">
+      <visual name="stand_visual">
+        <pose>-0.050 -0.050 0 0 0 0</pose>
+        <geometry>
+          <mesh>
+            <uri>$(find rbe595_sim)/meshes/regrasp_stand.stl</uri>
+            <scale>0.001 0.001 0.001</scale>
+          </mesh>
+        </geometry>
+        <material>
+          <ambient>0.85 0.85 0.82 1</ambient>
+          <diffuse>0.85 0.85 0.82 1</diffuse>
+        </material>
+      </visual>
+      <xacro:collision_box name="plate" x="${plate_cx}" y="0" z="${plate_t / 2}"
+                           sx="${plate[0]}" sy="${plate[1]}" sz="${plate_t}" />
+      <!-- Column up to the pocket floor: the square inscribed in it, a box rather than a
+           cylinder so a bottle's foot stands on it box-on-box (see spice_bottle.sdf.xacro). -->
+      <xacro:collision_box name="column" x="0" y="0" z="${plate_t + (seat_z - plate_t) / 2}"
+                           sx="${col_r * sqrt(2)}" sy="${col_r * sqrt(2)}" sz="${seat_z - plate_t}" />
+      <xacro:pocket_ring i="0" />
+      <!-- Datum tag, textured just above the bottom of its 0.4 mm sticker recess; the square is
+           tag_size * 10 / 8 wide so the black border itself is tag_size. -->
+      <visual name="stand_tag_visual">
+        <pose>${tag_x} 0 ${plate_t - 0.0003} 0 0 0</pose>
+        <geometry>
+          <plane>
+            <normal>0 0 1</normal>
+            <size>${tag_size * 10 / 8} ${tag_size * 10 / 8}</size>
+          </plane>
+        </geometry>
+        <material>
+          <diffuse>1 1 1 1</diffuse>
+          <pbr>
+            <metal>
+              <albedo_map>$(find rbe595_sim)/tags/tag36_11_${'%05d' % tag_id}.png</albedo_map>
+              <roughness>1.0</roughness>
+              <metalness>0.0</metalness>
+            </metal>
+          </pbr>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>
