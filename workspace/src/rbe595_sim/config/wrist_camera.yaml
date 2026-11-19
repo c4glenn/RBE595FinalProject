@@ -1,0 +1,24 @@
+# Camera on the Gen3 lite's wrist (added to the robot description by launch/sim.launch.py).
+#
+# Mounted on the side of the gripper body facing end_effector_link -x, looking out along the
+# gripper's approach axis but tilted `tilt` away from the fingers so they stay out of the image.
+# That side faces up in a side grasp (the +x side faces the table there), so the camera never
+# hangs below the hand.
+#
+# Frames: wrist_camera_link (x forward, y left, z up: Gazebo's camera convention) and
+# wrist_camera_optical_frame (x right, y down, z forward: the ROS image convention).
+parent_link: end_effector_link
+# wrist_camera_link origin in parent_link [m]. The gripper body spans x/y +/-0.033/0.045 and
+# z 0..0.078 here; the wrist ends at z 0.032.
+xyz: [-0.047, 0.0, 0.05]
+# Tilt [deg] of the viewing direction away from the approach axis, towards parent -x.
+tilt_deg: 20
+# Body, for the visual only [m]: depth along the view, width, height.
+size: [0.025, 0.06, 0.025]
+# Image: a wide-angle wrist camera (87 deg horizontal, like an Intel RealSense D405's colour
+# stream), so one snapshot from above takes in the rack and the bowl.
+horizontal_fov_deg: 87
+width: 1280
+height: 720
+update_rate: 5
+topic: wrist_camera/image   # gz topic; camera info on wrist_camera/camera_info

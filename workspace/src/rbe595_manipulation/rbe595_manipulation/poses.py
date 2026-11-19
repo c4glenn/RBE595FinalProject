@@ -72,6 +72,30 @@ RACK_PLACE_EE_XYZ = offset_along_approach(
     RACK_GRASP_POINT, RACK_ORIENTATION_RPY, GRIPPER_FINGERTIP_REACH - PLACE_DROP
 )
 
+
+def set_rack_slot(slot_xy, closing_angle=None):
+    """Retarget the rack poses above at another bottle (e.g. one picked by the spice
+    detector): same heights, new world (x, y), and optionally the fingers closing along world
+    direction `closing_angle` [rad] instead of along x. Steps read the RACK_* names at call
+    time, so they pick this up without any change."""
+    global RACK_SLOT_XY, RACK_GRASP_POINT, RACK_GRASP_EE_XYZ, RACK_APPROACH_EE_XYZ
+    global RACK_PLACE_EE_XYZ, RACK_ORIENTATION_RPY
+    if closing_angle is not None:
+        # top_grasp_rpy(yaw) closes the fingers along (sin yaw, -cos yaw)
+        RACK_ORIENTATION_RPY = top_grasp_rpy(closing_angle + math.pi / 2)
+    RACK_SLOT_XY = (float(slot_xy[0]), float(slot_xy[1]))
+    RACK_GRASP_POINT = (RACK_SLOT_XY[0], RACK_SLOT_XY[1], RACK_GRASP_Z)
+    RACK_GRASP_EE_XYZ = offset_along_approach(
+        RACK_GRASP_POINT, RACK_ORIENTATION_RPY, GRIPPER_FINGERTIP_REACH
+    )
+    RACK_APPROACH_EE_XYZ = offset_along_approach(
+        RACK_GRASP_POINT, RACK_ORIENTATION_RPY, GRIPPER_FINGERTIP_REACH + RACK_APPROACH_CLEARANCE
+    )
+    RACK_PLACE_EE_XYZ = offset_along_approach(
+        RACK_GRASP_POINT, RACK_ORIENTATION_RPY, GRIPPER_FINGERTIP_REACH - PLACE_DROP
+    )
+
+
 # --- staging location: a clear patch of table, used to switch grasp from top to side and
 #     back. Within easy Gen3 lite reach (0.5 m from the base), clear of the rack footprint
 #     (x in [-0.016, 0.216], y in [-0.105, 0.105]), of the rack's hidden floor collision

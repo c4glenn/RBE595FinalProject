@@ -6,6 +6,7 @@ from rclpy.node import Node
 
 from rbe595_manipulation.arm_client import ArmMoveClient
 from rbe595_manipulation.context import StepContext
+from rbe595_manipulation.detected_target import DetectedTarget
 from rbe595_manipulation.gripper_client import GripperClient
 from rbe595_manipulation.scene_setup import BottleScene, add_known_obstacles
 from rbe595_manipulation.steps import (
@@ -46,6 +47,7 @@ class PickPlaceSpiceActionServer(Node):
             bottle=BottleScene(self),
             logger=self.get_logger(),
         )
+        self._target = DetectedTarget(self)
         self._server = ActionServer(
             self,
             PickPlaceSpice,
@@ -55,10 +57,14 @@ class PickPlaceSpiceActionServer(Node):
         )
 
     def _execute(self, goal_handle):
-        self.get_logger().info(
-            f"v1 ignores spice_id={goal_handle.request.spice_id!r}; "
-            "always targets the hardcoded rack slot"
-        )
+        ok, message = self._target.apply(goal_handle.request.spice_id)
+        if not ok:
+            self.get_logger().error(message)
+            goal_handle.abort()
+            result = PickPlaceSpice.Result()
+            result.success = False
+            result.message = message
+            return result
         total = len(STEPS)
         for index, step in enumerate(STEPS, start=1):
             feedback = PickPlaceSpice.Feedback()

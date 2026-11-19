@@ -1,5 +1,6 @@
 # Goal
-string spice_id          # v1: logged, then ignored -- always targets the hardcoded rack slot
+string spice_id          # bottle number from the spice detector's image; empty: the detector's
+                         # selected_bottle, or the hardcoded rack slot if there is none
 ---
 # Result
 bool success

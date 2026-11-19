@@ -76,9 +76,76 @@ def grasp_assist_plugins(bottles):
     )
 
 
+def load_wrist_camera_cfg():
+    cfg_file = os.path.join(get_package_share_directory("rbe595_sim"), "config", "wrist_camera.yaml")
+    with open(cfg_file) as f:
+        return yaml.safe_load(f)
+
+
+def wrist_camera_links(cfg):
+    """URDF for the wrist camera (config/wrist_camera.yaml): wrist_camera_link (Gazebo camera
+    convention, x forward) and wrist_camera_optical_frame (ROS image convention, z forward)."""
+    x, y, z = cfg["xyz"]
+    # View direction tilted from parent +z towards parent -x; image "up" (link +z) points away
+    # from the fingers. Link axes in the parent: x = (-s, 0, c), y = (0, 1, 0), z = (-c, 0, -s),
+    # which is rpy (pi, -(pi/2 - tilt), pi).
+    tilt = math.radians(cfg["tilt_deg"])
+    rpy = f"{math.pi} {-(math.pi / 2 - tilt)} {math.pi}"
+    d, w, h = cfg["size"]
+    return (
+        '<link name="wrist_camera_link">'
+        f'<visual><origin xyz="{-d / 2} 0 0" rpy="0 0 0"/>'
+        f'<geometry><box size="{d} {w} {h}"/></geometry>'
+        '<material name="wrist_camera_black"><color rgba="0.1 0.1 0.1 1"/></material></visual>'
+        "</link>"
+        '<joint name="wrist_camera_joint" type="fixed">'
+        f'<parent link="{cfg["parent_link"]}"/><child link="wrist_camera_link"/>'
+        f'<origin xyz="{x} {y} {z}" rpy="{rpy}"/>'
+        "</joint>"
+        '<link name="wrist_camera_optical_frame"/>'
+        '<joint name="wrist_camera_optical_joint" type="fixed">'
+        '<parent link="wrist_camera_link"/><child link="wrist_camera_optical_frame"/>'
+        f'<origin xyz="0 0 0" rpy="{-math.pi / 2} 0 {-math.pi / 2}"/>'
+        "</joint>"
+    )
+
+
+def wrist_camera_sensor(cfg):
+    """The Gazebo camera sensor on wrist_camera_link (rendered by the world's Sensors system)."""
+    return (
+        '<gazebo reference="wrist_camera_link">'
+        '<sensor name="wrist_camera" type="camera">'
+        f"<topic>{cfg['topic']}</topic>"
+        f"<update_rate>{cfg['update_rate']}</update_rate>"
+        "<always_on>true</always_on>"
+        "<camera>"
+        f"<horizontal_fov>{math.radians(cfg['horizontal_fov_deg'])}</horizontal_fov>"
+        f"<image><width>{cfg['width']}</width><height>{cfg['height']}</height>"
+        "<format>R8G8B8</format></image>"
+        "<clip><near>0.02</near><far>5</far></clip>"
+        "</camera>"
+        "</sensor>"
+        "</gazebo>"
+    )
+
+
+class WithWristCamera(Substitution):
+    """The robot URDF with the wrist camera's links added (for robot_state_publisher, so the
+    camera's pose is on TF)."""
+
+    def __init__(self, description):
+        super().__init__()
+        self.description = description
+
+    def perform(self, context):
+        urdf = self.description.perform(context)
+        return urdf.replace("</robot>", wrist_camera_links(load_wrist_camera_cfg()) + "</robot>")
+
+
 class GazeboRobotDescription(Substitution):
     """The robot URDF as spawned into Gazebo:
 
+    - the wrist camera (config/wrist_camera.yaml) added;
     - any gz Sensors system plugin removed: kinova.urdf.xacro always adds one when
       sim_gazebo:=true, but the world already loads one; two in the same server crash the
       renderer;
@@ -116,7 +183,9 @@ class GazeboRobotDescription(Substitution):
                 "</robot>",
                 f'<gazebo reference="{link}"><mu1>{mu}</mu1><mu2>{mu}</mu2></gazebo></robot>',
             )
-        return urdf.replace("</robot>", grasp_assist_plugins(self.bottles) + "</robot>")
+        camera = load_wrist_camera_cfg()
+        extra = wrist_camera_links(camera) + wrist_camera_sensor(camera)
+        return urdf.replace("</robot>", extra + grasp_assist_plugins(self.bottles) + "</robot>")
 
 
 def spawn_spice_bottle(name, tag_id, x, y, z=0.75, mass=0.15):
@@ -383,7 +452,11 @@ def generate_launch_description():
                 executable="robot_state_publisher",
                 output="both",
                 parameters=[
-                    {"robot_description": ParameterValue(robot_description_content, value_type=str)},
+                    {
+                        "robot_description": ParameterValue(
+                            WithWristCamera(robot_description_content), value_type=str
+                        )
+                    },
                     {"use_sim_time": True},
                 ],
             ),
@@ -392,8 +465,8 @@ def generate_launch_description():
                 executable="parameter_bridge",
                 arguments=[
                     "/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock",
-                    "/scene_camera/image@sensor_msgs/msg/Image[gz.msgs.Image",
-                    "/scene_camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo",
+                    "/wrist_camera/image@sensor_msgs/msg/Image[gz.msgs.Image",
+                    "/wrist_camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo",
                 ],
                 output="screen",
             ),

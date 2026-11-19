@@ -1,0 +1,95 @@
+# Spice bottle / bowl detection from the wrist camera (rbe595_manipulation/vision/).
+#
+# The spice detector node moves the arm to the observe pose below, takes one snapshot with the
+# wrist camera, and detects the bottles and the bowl in it. The camera looks at the table at an
+# angle, so a round cap or bowl rim shows up as an ellipse whose size depends on how far it is
+# from the camera. The detector therefore first warps the image to a top-down ("bird's-eye")
+# view of a horizontal plane at the object's top height. There, every cap/rim is a true circle
+# of a known size in pixels (diameter / resolution), so HoughCircles can be given a tight radius
+# range, and a circle centre maps straight to world (x, y).
+#
+# All distances in metres, all poses in the Gazebo world frame.
+
+# --- wrist camera (rbe595_sim/config/wrist_camera.yaml) ---
+camera:
+  image_topic: /wrist_camera/image
+  info_topic: /wrist_camera/camera_info
+  # TF frames: the camera's optical frame (z forward, x right, y down) and the arm's base.
+  # World = base_link + rbe595_manipulation.poses.ARM_BASE_WORLD_XYZ (the sim's spawn offset).
+  optical_frame: wrist_camera_optical_frame
+  base_frame: base_link
+  end_effector_frame: end_effector_link
+
+# --- where the snapshot is taken from ---
+# The camera is put at `camera_position`, looking at `look_at`, with `image_up` (a world
+# direction) towards the top of the image; the arm pose that does that comes from the camera's
+# mount on TF. This one is ~0.4 m above and just in front of the arm base, high enough for the
+# 87 deg camera to take in the whole rack and the bowl at poses.BOWL_XY, and with the far side
+# of the table at the top of the image, as seen from the arm.
+observe:
+  camera_position: [-0.25, 0.22, 1.15]
+  look_at: [0.06, 0.22, 0.80]
+  image_up: [1.0, 0.0, 0.0]
+  # Image taken this long [s] after the arm stops (on top of the arm client's own settle time).
+  settle_s: 0.5
+
+# --- top-down view the detection runs in ---
+birdseye:
+  resolution: 0.0015          # metres per pixel
+  # World x/y area to warp (the table top, worlds/table_world.sdf: 1.2 x 1.5 m at the origin)
+  x_range: [-0.6, 0.6]
+  y_range: [-0.75, 0.75]
+
+# --- spice bottle (rbe595_sim/models/spice_bottle.sdf.xacro) ---
+bottle:
+  diameter: 0.04833           # cap / body diameter
+  height: 0.0813
+  # Height of the cap top: the plane the image is warped to for bottles.
+  # Rack slot floor (0.75 table + 0.004 rack floor) + 1 mm spawn gap + 0.0813 bottle height.
+  top_z: 0.8363
+  # HSV threshold (OpenCV ranges: H 0-179, S/V 0-255). The jars are red, and red hue wraps
+  # around 0, so it is given as two ranges and the masks are OR'ed together.
+  hsv_ranges:
+    - {lower: [0, 90, 50], upper: [10, 255, 255]}
+    - {lower: [170, 90, 50], upper: [179, 255, 255]}
+
+# --- bowl (rbe595_sim/models/bowl.sdf.xacro, sizes from sim.launch.py) ---
+bowl:
+  diameter: 0.15              # outer rim diameter
+  height: 0.065
+  top_z: 0.815                # rim top: 0.75 table + 0.065 bowl height
+  hsv_ranges:
+    - {lower: [95, 80, 50], upper: [125, 255, 255]}
+
+# --- HoughCircles (cv2.HOUGH_GRADIENT) on the colour-masked top-down image ---
+hough:
+  radius_tolerance: 0.15      # search radius = (diameter / 2) * (1 +/- this)
+  # Hough's own minDist, as a fraction of the diameter: circles closer than this are repeats
+  # of the same circle.
+  duplicate_dist_factor: 0.3
+  # Two detections closer than this fraction of the diameter would overlap, so only the one
+  # whose outline is most an edge is kept (see SpiceCircleDetector._detect).
+  min_dist_factor: 0.9
+  # In the top-down view an upright cylinder's sides project out from its top circle towards
+  # the camera. A circle is kept only if the image just past it, towards the camera, is the
+  # object's colour; this rejects circles fitted to the far end of a bottle's (or the bowl's)
+  # projected sides. Skipped when the sides would stick out less than this many radii (an
+  # object nearly straight below the camera).
+  body_check_min_offset: 0.5
+  dp: 1.0                    # accumulator resolution (inverse ratio to the image)
+  canny_high: 100             # param1: upper Canny threshold
+  accumulator_threshold: 12   # param2: lower finds more (and more false) circles
+  blur_kernel: 5              # Gaussian blur before Hough (odd, pixels)
+  # A circle is kept only if at least this fraction of it is the object's colour (after the
+  # mask's holes, e.g. the cap's tag, are filled in).
+  min_fill: 0.6
+  # ... and at least this fraction of its outline is an edge. A cap or rim is edged all the way
+  # round (~0.8-1.0); a circle Hough fits partway along a jar's projected sides only at those
+  # two sides (~0.5-0.6).
+  min_edge_support: 0.7
+
+# --- numbering ---
+# Bottles are numbered 0.. in reading order as seen in the camera image: top row first,
+# left to right. Centres whose image rows differ by less than this fraction of the bottle's
+# apparent diameter count as the same row.
+row_tolerance: 0.5

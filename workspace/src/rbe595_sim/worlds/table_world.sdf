@@ -108,40 +108,5 @@
       </link>
     </model>
 
-    <!--
-      Fixed scene camera beyond the table's +x end, looking back down its length at the arm,
-      spice rack and every position the bowl can be spawned at (see random_bowl_position() in
-      sim.launch.py). Images on gz topic /scene_camera/image (bridged to ROS by sim.launch.py).
-    -->
-    <model name="scene_camera">
-      <static>true</static>
-      <pose>1.2 0 1.7 0 0.492 3.1416</pose>
-      <link name="link">
-        <visual name="visual">
-          <geometry><box><size>0.04 0.08 0.04</size></box></geometry>
-          <material>
-            <ambient>0.1 0.1 0.1 1</ambient>
-            <diffuse>0.1 0.1 0.1 1</diffuse>
-          </material>
-        </visual>
-        <sensor name="camera" type="camera">
-          <topic>scene_camera/image</topic>
-          <update_rate>10</update_rate>
-          <always_on>true</always_on>
-          <camera>
-            <horizontal_fov>1.047</horizontal_fov>
-            <image>
-              <width>1280</width>
-              <height>720</height>
-              <format>R8G8B8</format>
-            </image>
-            <clip>
-              <near>0.05</near>
-              <far>10</far>
-            </clip>
-          </camera>
-        </sensor>
-      </link>
-    </model>
   </world>
 </sdf>

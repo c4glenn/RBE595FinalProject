@@ -7,8 +7,6 @@
   <maintainer email="philip@randomsmiths.com">Philip Smith</maintainer>
   <license>MIT</license>
 
-  <buildtool_depend>ament_python</buildtool_depend>
-
   <exec_depend>rclpy</exec_depend>
   <exec_depend>rbe595_manipulation_interfaces</exec_depend>
   <exec_depend>control_msgs</exec_depend>
@@ -19,6 +17,14 @@
   <exec_depend>kinova_gen3_lite_moveit_config</exec_depend>
   <exec_depend>moveit_configs_utils</exec_depend>
   <exec_depend>moveit_ros_move_group</exec_depend>
+  <!-- spice_detector (Hough circle bottle / bowl detection) -->
+  <exec_depend>sensor_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>rqt_image_view</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
 
   <test_depend>ament_copyright</test_depend>
   <test_depend>ament_flake8</test_depend>
