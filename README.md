@@ -142,3 +142,76 @@ them:
   `rbe595_sim/config/wrist_camera.yaml`.
 - The stand is printed from the parametric CAD; its sizes are in
   `rbe595_sim/config/regrasp_stand.yaml`.
+
+## Run on the real arm
+
+The real-robot pipeline is in `real/` (details: [real/README.md](real/README.md)). It does not
+use colcon: one script starts the robot and camera drivers, runs the task, then stops them.
+
+**One-time setup:** install the Kinova driver (`ros2_kortex`) in `$KORTEX_WS`,
+`underlay_ws/install` or `~/kortex_ws/install`. Then, **in each new terminal** (nothing is written
+to `~/.bashrc`), run:
+
+```bash
+source real/activate.sh
+```
+
+This sources ROS 2 Jazzy and the driver, and adds the `spice` command. Without it, use
+`real/spice.sh <command>` instead.
+
+**Commands:**
+
+| Command | What it does |
+|---|---|
+| `spice check` | checks everything is installed and plugged in (camera on USB 3, arm reachable) |
+| `spice vision` | level 0: live tags and lid detection, no motion |
+| `spice dry` | perception and every planned pose, no motion and no gripper |
+| `spice level1` | takes the jar out of the rack and puts it back (steps 1, 2, 8) |
+| `spice full` | the whole task, steps 1-8 (find, top grasp, stand, side regrasp, shake over the bowl, stand, top regrasp, rack) |
+| `spice full --steps 1-4,6-8` | the whole task without the shake |
+| `spice resume 7-8` | carries on from the last run's saved state with the steps given |
+| `spice home` | gets the arm home safely from where a run stopped (back out, up, home) |
+| `spice jog` | moves the arm by hand from the terminal |
+| `spice bringup` | only starts the robot and camera (stays in the foreground) |
+
+**Task options** (add them after the command, e.g. `spice full --index 1 --home`):
+
+| Option | Meaning |
+|---|---|
+| `--steps 1,2,8` / `--steps 1-4` | which steps to run (default `1-8`) |
+| `--resume [dir]` | starts from a saved run's state (default: the latest) |
+| `--index N` | several lids seen: pick lid N (numbered in the survey picture) |
+| `--ask` | asks `[y/N]` before every motion (the default is automatic) |
+| `--dry-run` | no motion and no gripper |
+| `--show` | pops up each picture as it is taken |
+| `--home` | goes home at the end without asking |
+| `--go-home` | no steps, just goes home safely (what `spice home` uses) |
+
+**While it runs:** moves are automatic. **Any key pauses**: the move in progress is cancelled and
+the arm stops where it is. Then **Enter / space / c** carries on (the move is planned again from
+there), and **q** (or Ctrl-C at any time) stops the run. After a stop, `spice home` gets the arm
+out safely, and `spice resume <steps>` carries on.
+
+**Environment variables** (put them in front, e.g. `NO_BRINGUP=1 spice full`):
+
+| Variable | Meaning |
+|---|---|
+| `NO_BRINGUP=1` | the robot and camera already run in another terminal (`spice bringup`) |
+| `CAMERA_PROFILE=848x480x30` | another camera mode (default 1280x720 at 15 fps) |
+| `RVIZ=false` | no RViz window |
+| `FAKE_ROBOT=1` | no arm: MoveIt and RViz with a simulated arm, no camera (`FAKE_ROBOT=1 spice bringup`) |
+| `KORTEX_WS=<path>` | where the Kinova driver is installed |
+
+**Settings:** `real/config/real.yaml` (hand-eye mount, speeds `speed` / `speed_contact`, gripper,
+jar sizes, bowl, `pour` tilt and shake). Each run saves its pictures and `state.json` in
+`real/captures/<time>/` (used by `--resume`), and its log in `real/captures/logs/`.
+
+**Offline tests** (no robot; run after `source real/activate.sh`):
+
+```bash
+python3 real/test/test_offline.py
+```
+
+```bash
+python3 real/test/test_key_pause.py
+```

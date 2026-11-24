@@ -7,7 +7,7 @@
 #   real/spice.sh vision           level 0: live tags + lid picture, no motion
 #   real/spice.sh dry              perception + every planned pose, no motion
 #   real/spice.sh level1           pick the salt jar out of the rack and put it back (steps 1,2,8)
-#   real/spice.sh full             the whole regrasp sequence (steps 1-4, 6-8)
+#   real/spice.sh full             the whole task, steps 1-8 (--steps 1-4,6-8 skips the shake)
 #   real/spice.sh resume 4,6,7,8   carry on from the last run's saved state
 #   real/spice.sh home             get the arm home safely from where a run stopped (back out, up, home)
 #   real/spice.sh jog              move the arm by hand from the terminal (joints, x/y/z, save poses)
