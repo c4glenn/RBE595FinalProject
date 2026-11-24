@@ -57,3 +57,4 @@ log/
 # Underlay: only ros2_kortex is tracked (a submodule); its deps are fetched by vcs in build.sh
 underlay_ws/src/*
 !underlay_ws/src/ros2_kortex
+real/captures/
