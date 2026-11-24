@@ -1,0 +1,244 @@
+# Real-robot settings for the spice task (real/run_task.py, real/tools/check_vision.py).
+# All poses are in base_link, [x, y, z, qx, qy, qz, qw]; all lengths in metres.
+# Lines marked MEASURE are taken from the CAD / the sim and should be checked on the hardware.
+
+# ---- robot + camera (same layout as HW7's rbe_vbm_test/config/views.yaml, so the HW7 bringup
+#      launch and go_home.py read this file unchanged) -------------------------------------------
+robot_ip: 192.168.1.10
+
+# Where the camera is on the wrist (hand-eye). The code cannot see this: it MUST match the real
+# mount, or every position is mirrored (rack measured backwards, arm drives off to the wrong side).
+# Pick one with the last line of this block: hand_eye: *outside   or   hand_eye: *inside
+#
+# outside: HW7's calibration (rbe_vbm_test/config/hand_eye_result.txt: 17 samples, consistency
+#   mean 4.8 mm, max 9.0 mm). Camera on end_effector_link's +x side = at home, on the side of the
+#   gripper AWAY from the robot; in its picture the rack's tag 6 is left of tag 7.
+# inside: the same mount turned 180 deg around the gripper axis (camera on the -x side = at home,
+#   on the side TOWARDS the robot). Mirrored from HW7's numbers, not calibrated: a few mm off.
+hand_eye_mounts:
+  outside: &outside
+    parent: end_effector_link
+    child: camera_link
+    translation: [0.06041, -0.01027, 0.06052]              # x, y, z
+    rotation: [0.706184, -0.014006, 0.707857, 0.006797]    # qx, qy, qz, qw
+  inside: &inside
+    parent: end_effector_link
+    child: camera_link
+    translation: [-0.06041, 0.01027, 0.06052]
+    rotation: [-0.014006, -0.706184, -0.006797, 0.707857]
+hand_eye: *inside
+
+base_frame: base_link
+ee_link: end_effector_link
+speed: 0.3                 # MoveIt velocity/acceleration scaling: moves through free space (was 0.1 for all)
+speed_contact: 0.1         # ... and for the moves onto / into / out of something: grasp, lift out, put in
+motion: rrtconnect         # used by helpers/go_home.py only
+cartesian_fallback: false
+
+# HW7 home: camera looking down at the table in front of the arm.
+home: [0.329, -0.017, 0.391, 1.000, -0.017, -0.012, -0.011]
+
+# Where the camera looks from at the start (step 1). It must see the bottle's lid, and should
+# see both rack tags (6, 7) and the stand tag (8). Defaults to home. Check with
+#   python3 tools/check_vision.py --pose survey
+survey: null
+# If the stand tag is not seen from the survey pose, the arm goes here (empty-handed, before the
+# pick) to look for it. null = give up instead.
+stand_look: null
+# Same for the bowl (no tag): if the survey picture has no bowl in it, the arm goes here to look.
+# [x, y, z, qx, qy, qz, qw] of end_effector_link, camera down, ~0.35 m above the table over where
+# the bowl usually is. null = no second look (step 1 warns; only step 5 needs the bowl).
+bowl_look: null
+
+topics:
+  image: /camera/camera/color/image_raw
+  info: /camera/camera/color/camera_info
+  depth: /camera/camera/aligned_depth_to_color/image_raw   # bringup_camera.launch.py aligns it
+  joint_states: /joint_states
+
+# ---- gripper (gen3_lite_2f) ---------------------------------------------------------------------
+gripper:
+  action: /gen3_lite_2f_gripper_controller/gripper_cmd
+  finger_joint: right_finger_bottom_joint
+  # 0.35 ~ 85 mm between the pads: the rack's X pitch is designed for an 85 mm opening
+  # (rack_cad/spice_rack.py GRIP_OPEN), so the open fingers fit between neighbouring jars.
+  open: 0.35
+  # Commanded well past contact (joint limit 0.85); the controller stalls on the jar. On the real arm
+  # the jar stops them at 0.64-0.75 (side wrap highest), and they creep a little after (0.77 seen);
+  # closing on nothing they get to the command (asked 0.75 -> 0.740 "reached"). So: as far as the
+  # joint goes, for the widest gap; right after closing, the gripper's own "stalled / reached"
+  # decides; after that the finger reading below.
+  closed: 0.84
+  max_effort: 100.0
+  # Finger check after closing (right_finger_bottom_joint):
+  moved_min: 0.15          # below this the fingers did not move (gripper fault)
+  # At/above this they closed on nothing (an empty close reads ~0.83): checked again while carrying.
+  # Was 0.77: a good side wrap that crept to 0.77 failed.
+  holding_max: 0.81
+  # end_effector_link -> finger-pad centre, along the approach (+z). The URDF's tool_frame says
+  # 0.130, but on the real arm the pads grip ~2 cm further out: at 0.130 the top grasp put the
+  # fingertips on the rack and the side grasp pushed the jar into the palm. Measured: 0.150.
+  reach: 0.150
+  # Side grasp only: end_effector_link -> jar axis, horizontally. 0.150: the jar starts on the
+  # finger pads and the closing fingers wrap it into the palm -- a secure grasp. 0.110 (tried) went
+  # in too far; 0.185 (tried) missed. If the stand is not fixed down, the wrap drags it (and the
+  # jar) towards the arm, and step 6 then sets the jar down short: tape / screw the stand down.
+  side_reach: 0.150
+
+# ---- AprilTags (tag36h11) -------------------------------------------------------------------------
+tags:
+  rack_ids: [6, 7]          # 6 on the rack's +y side, 7 on its -y side, both on the front ledge
+  stand_id: 8
+  # Black square's edge (not the sticker): our stickers are 36 mm with the tag's one-cell white
+  # margin (they fill the rack's 36 mm pockets), so the black square is 8/10 of that = 28.8 mm;
+  # measured 28.1-28.2 mm on all three at 1280x720. Check with a ruler.
+  sizes: {6: 0.0288, 7: 0.0288, 8: 0.0288}
+  measure_frames: 10        # fresh camera frames averaged per measurement
+  # Position from the aligned depth along the ray to the tag centre (does not depend on the
+  # printed size; the rotation comes from the corners). false = PnP with the size above.
+  use_depth: true
+  # Rack and stand tags lie flat: their yaw comes from the corners cut with the measured tag
+  # plane (no PnP flip on small tags), and a frame whose measured edge is >20% off `sizes` is
+  # dropped.
+
+# ---- free moves (helpers/robot_motion.py) ---------------------------------------------------------
+# A move that cannot be a straight line: Pilz PTP (IK nearest the current joints, then all joints in
+# a straight line at once: short, the same every run), else OMPL RRTConnect. Both keep the arm in
+# its normal shape (guard, as the sim's arm client): base turned within base_tolerance (rad) of the
+# target, elbow (joint_3) inside elbow_range (rad). guard: null = no such limits.
+planning:
+  ptp: true
+  guard:
+    base_joint: joint_1
+    base_tolerance: 1.0
+    elbow_joint: joint_3
+    elbow_range: [0.0, 2.6]
+
+# ---- what MoveIt must not hit (helpers/scene.py) ---------------------------------------------------
+# Without this MoveIt plans in an empty world and a free move can put the elbow through the table.
+scene:
+  table_top_z: -0.060       # table surface in base_link: rack top (-0.036 measured) - rack height 0.024;
+                            # step 1 corrects it from the measured rack
+  padding: 0.015            # keep every arm link this far above the table
+  camera: true              # the D405 as a box on the wrist (at the hand-eye pose)
+
+# ---- rack (rbe595_sim/config/spice_rack.yaml, from rack_cad/spice_rack.py) ------------------------
+rack:
+  size: [0.231, 0.209, 0.024]
+  tag_x_in_rack: -0.0925    # tags' centre from the rack centre along rack +x (-len_x/2 + 0.023)
+  tag_recess: 0.0003        # tag face below the rack top
+  pocket_depth: 0.020       # rack top down to the slot floor
+  # Without both rack tags: the fingers close along the base -> jar direction.
+
+# ---- regrasp stand (rbe595_sim/config/regrasp_stand.yaml) -----------------------------------------
+stand:
+  # Pocket centre from the tag centre: `tag_to_pocket` along the tag's +x (red axis), turned by
+  # `pocket_angle_deg` towards the tag's +y. 58 mm is the CAD (rack_cad/spice_rack.py: tag pad
+  # and column on one line). The angle depends on how the sticker is turned in its pad: on our
+  # stand the tag's red axis points AWAY from the column, so 180. tools/check_vision.py measures
+  # both from the cup itself ("stand cup measured: ...") -- copy its numbers here if they differ.
+  tag_to_pocket: 0.058
+  pocket_angle_deg: 180.0
+  seat_above_tag: 0.0353    # pocket floor above the tag face (0.041 seat - 0.0057 tag face)
+  pocket_mouth: 0.059       # only for drawing
+  approach_clearance: 0.06  # smaller than at the rack: the jar stands 41 mm higher here
+
+# ---- the salt jar --------------------------------------------------------------------------------
+jar:
+  height: 0.0813            # base to lid top, MEASURE
+  lid_diameter: 0.050       # MEASURE (rack_cad CAP_D)
+  top_grasp_below_top: 0.015   # top grasp (step 2, out of the rack): finger-pad centre this far below the lid top
+  # Step 7's top grasp, the one the jar is then inserted into its rack slot with (step 8). At 0.015
+  # the pads hold the lid's lower edge only (lid 14 mm tall, 50 mm; glass body 48 mm), a line of
+  # contact the jar pivots about, and its bottom (81 mm down) came to the slot 5+ mm off and caught
+  # on the mouth's rim. 0.025: pads on the glass body. Not deeper: the fingertips reach ~0.175 from
+  # end_effector_link (at reach 0.130 ~ 0.035 here they touched the rack); 0.025 leaves ~1 cm
+  # above the rack top / the stand's rim.
+  insert_grasp_below_top: 0.025
+  # side grasp: finger-pad centre this far below the lid top. Was 0.033: the lower finger then
+  # passed ~5 mm over the stand's cup rim (61 mm below the lid top). 0.025 = 8 mm more room.
+  side_grasp_below_top: 0.025
+
+motion:
+  approach_clearance: 0.10  # stand-off before/after a grasp, along the approach
+  place_drop: 0.004         # let go with the jar's bottom this far above the pocket floor (lowered all the way)
+  # Or let go with its bottom this far above the pocket MOUTH and let it drop the last 2 cm (tried
+  # 0.003: the drop tilted it). null = lower it all the way in (place_drop), held straight by the
+  # body grasp (jar.insert_grasp_below_top)
+  release_above_mouth: null
+  settle: 0.8               # s to wait at the mouth before letting go: held by its lid, the jar swings
+
+# ---- step 5: pouring over the bowl (tran poses.BOWL_*; shake.py) ----------------------------------
+pour:
+  above_rim: 0.08           # jar's grasp point this far above the bowl's rim centre (tipped, it stays above)
+  tilt_deg: 130             # tip over (joint_6 turn) from upright: lid end 40 deg below horizontal
+  shake_deg: 15             # shake: tilt +- this, cycles times (tilt + shake must stay under 149 deg)
+  cycles: 3
+  camera_clear: 0.02        # tipped past 90 deg the wrist camera swings below the hand: the hand goes
+                            # higher if needed so the camera box stays this far above the rim
+
+# ---- the bowl (spice_task/bowl.py): no tag, found anywhere by Hough + depth in step 1 ---------------
+bowl:
+  detect: true
+  height: 0.037             # the bowl's own height (rim above the table), measured by hand: MoveIt's
+                            # bowl goes from the measured rim down by this much
+  diameter_range: [0.14, 0.30]   # rim diameter, m; any bowl in this range (narrow it once you know yours)
+  height_guess: 0.037       # first guess of the rim above the table; then measured from the depth
+  min_height: 0.03          # a bowl's rim is at least this above the table (a flat circle is not a bowl)
+  min_depth: 0.015          # ... and its inside at least this lower than the rim (a plate / lid is not)
+  min_seen: 0.4             # this much of the rim must be in the picture (it is big); then a close look
+  min_edge_support: 0.5     # fraction of the visible rim on a colour edge
+  accumulator_threshold: 30 # Hough param2 (lower finds more, and more false)
+  canny_high: 80
+  resolution: 0.002         # top-down view, m per pixel
+  close_look: true          # look again from right above it (whole rim in the picture)
+  # The radius found is usually the INSIDE edge of the rim (the opening), the centre within a few mm.
+
+# ---- Hough-circle lid detection (spice_task/lid_detector.py) --------------------------------------
+# The depth image is turned into a top-down height map (1 mm cells); the lid is the disc of
+# cells at the lid-top height; cv2.HoughCircles with the radius pinned to lid_diameter / 2 finds
+# it (the main branch's circle detector, on a height mask instead of a colour mask, so the
+# "salt" writing and the shiny lid do not matter).
+lid_detection:
+  # colour: Hough on the colour image seen top-down at the lid height (like the main branch; works
+  #         when the shiny lid has no depth), the depth way below if that finds nothing.
+  # depth:  only the depth way (lid = raised disc in the depth).
+  method: colour
+  colour_accumulator_threshold: 20   # Hough param2 on the colour view: lower finds more (and more false)
+  colour_min_edge_support: 0.6       # fraction of the circle's outline on a colour edge
+  depth_reject: 0.015       # colour circle dropped if the depth inside it is this far off the lid height
+                            # (an empty pocket's floor is ~2-8 cm lower)
+  resolution: 0.001
+  band: 0.010               # cells within +-band of the lid-top height count as lid
+  radius_tolerance: 0.15
+  accumulator_threshold: 12 # Hough param2 on the depth mask
+  canny_high: 100
+  blur_kernel: 5
+  min_fill: 0.6             # fraction of the circle that is lid-height cells
+  min_edge_support: 0.55    # fraction of the circle's outline on an edge
+  gripper_clear: 0.165      # ignore points closer than this to end_effector_link along its +z (fingers)
+  max_depth: 0.6            # ignore depth beyond this (m from the camera)
+  depth_frames: 5           # depth images averaged (median)
+  search_radius: 0.06       # when re-measuring a lid: look this far around where it was
+  # Lids are measured with the camera straight above them, this high (camera optical centre to
+  # lid top). The D405 sees well from ~7 cm; at 0.18 m the 87 x 58 deg view is ~0.34 x 0.20 m.
+  look_height: 0.18
+
+checks:
+  aim_tolerance: 0.0015     # look-move-look until the correction is below this
+  # Before every contact the task looks again (stand: tag 8, rack: tags 6/7, jar: Hough lid): a grasp
+  # can nudge the stand / rack. Jar in the stand: its lid more than this off the pocket axis, or this
+  # much low = not standing straight (tilted, on the rim): stop instead of grasping it.
+  seat_tolerance: 0.010
+  max_aims: 3
+  # After letting go in a pocket (steps 3, 8) the lid is measured: within reseat_tolerance of the
+  # pocket axis = in; up to seat_tolerance = in, a bit off (logged); more = stop. reseat_tries > 0 would
+  # pick a leaning jar up again and retry (off: get it in right the first time instead)
+  reseat_tolerance: 0.005
+  reseat_tries: 0
+  # "Is the jar in the pocket?" = the pocket now compared with reference pictures (reference.py):
+  # stand empty (step 1), stand with jar (step 3), rack slot with jar (step 1), slot empty (step 2).
+  compare_margin: 0.008     # compared area: lid radius + this, around the pocket centre
+  compare_grey_step: 30     # a pixel "changed" if its grey level moved more than this (0-255)
+  compare_changed: 0.25     # with one reference only: this fraction changed = different
+  look_at_empty_slot: true  # step 2: camera over the slot after the pick (the "slot empty" picture)

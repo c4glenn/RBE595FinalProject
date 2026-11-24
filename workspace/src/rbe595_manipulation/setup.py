@@ -17,7 +17,7 @@ setup(
     zip_safe=True,
     maintainer="Philip Smith",
     maintainer_email="philip@randomsmiths.com",
-    description="Dead-reckoning pick/place/shake action server for the spice bottle demo",
+    description="Pick/place/shake action server for the spice bottle demo: finds the jar by its cap AprilTag with the wrist camera",
     license="MIT",
     tests_require=["pytest"],
     entry_points={

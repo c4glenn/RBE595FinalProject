@@ -1,5 +1,5 @@
 # Goal
-string spice_id          # v1: logged, then ignored -- always targets the hardcoded rack slot
+string spice_id          # cap tag ID of the jar to fetch: "3", "tag3" or "tag_3"
 ---
 # Result
 bool success

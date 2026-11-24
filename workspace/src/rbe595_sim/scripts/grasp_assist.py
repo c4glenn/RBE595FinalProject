@@ -9,9 +9,14 @@ physical grasp with a fixed joint:
 - every spice bottle has a DetachableJoint system on the robot (added by sim.launch.py), parent
   end_effector_link, child the bottle;
 - when the fingers have closed onto a bottle (finger joint past ATTACH_AT, bottle between the
-  finger pads) and have lifted it LIFT_TO_ATTACH off where it stood -- clear of a rack pocket,
-  where a rigidly held bottle would bind -- that bottle is attached; when the fingers open
-  again (below DETACH_AT) it is let go.
+  finger pads), that bottle is attached as soon as they have held it in the holding range for
+  SETTLE_S, before the lift starts, wherever it stands (table, rack pocket, regrasp stand), or
+  failing that once it is lifted LIFT_TO_ATTACH_TABLE (on the table) / LIFT_TO_ATTACH (in a
+  pocket) up. Lifting a bottle by contact alone lets it swing in the fingers about the line
+  between them: it comes out of a rack pocket ~5 deg crooked, enough to land it on the rim of
+  the regrasp stand's pocket (1 mm play a side) or the rack's when it goes back in. Real rubber
+  pads hold it square;
+- when the fingers open again (below DETACH_AT for RELEASE_S) it is let go.
 
 The fingers still close on the bottle physically and stop at its width, so a grasp that misses
 closes all the way and attaches nothing, exactly as on the real gripper. Nothing here is needed
@@ -42,6 +47,18 @@ MAX_RADIAL = 0.035
 HEIGHT_MARGIN = 0.02
 # Rack pockets are 20 mm deep.
 LIFT_TO_ATTACH = 0.022
+LIFT_TO_ATTACH_TABLE = 0.003
+# How long the finger joint has to stay in the holding range for the fingers to count as closed
+# on a table-standing bottle. The reading jitters by a few hundredths while they squeeze it, so
+# this checks the range, not stillness. The fingers close at 0.6 rad/s: well within this they
+# have reached the jar from ATTACH_AT.
+SETTLE_S = 0.3
+# The finger reading dips for an instant when a held bottle knocks against something; only a
+# finger opening that lasts this long lets the bottle go.
+RELEASE_S = 0.2
+# A bottle whose base was within this of the table top stood on the table (rack pocket floors
+# are 4 mm higher).
+ON_TABLE_TOLERANCE = 0.002
 
 
 def topic(bottle, leaf):
@@ -83,12 +100,15 @@ class GraspAssist(Node):
         self.bottles = list(self.declare_parameter("bottles", ["spice_bottle_0"]).value)
         self.bottle_height = self.declare_parameter("bottle_height", 0.0813).value
         world = self.declare_parameter("world", "table_world").value
+        self.table_top_z = self.declare_parameter("table_top_z", 0.75).value
 
         self._lock = threading.Lock()
         self._poses = {}  # name -> (position, quaternion wxyz); robot links are model-relative
         self._state = {}  # bottle -> "attached" / "detached", from the DetachableJoint
         self._held = None
         self._gripped = None  # (bottle, z it stood at) once the fingers closed on it
+        self._closed_since = None  # when the finger reading last entered the holding range
+        self._opened_at = None  # when the finger reading last dropped below DETACH_AT
 
         self._gz = GzNode()
         self._attach = {b: self._gz.advertise(topic(b, "attach"), Empty) for b in self.bottles}
@@ -159,17 +179,29 @@ class GraspAssist(Node):
         if FINGER_JOINT not in msg.name:
             return
         finger = msg.position[msg.name.index(FINGER_JOINT)]
+        now = self.get_clock().now().nanoseconds * 1e-9
         with self._lock:
             held, gripped = self._held, self._gripped
         if finger < DETACH_AT:
+            if self._opened_at is None:
+                self._opened_at = now
+            if now - self._opened_at < RELEASE_S:
+                return
             if held is not None:
                 self._detach[held].publish(Empty())
                 self.get_logger().info(f"fingers opened: {held} released")
             with self._lock:
                 self._held = self._gripped = None
+            self._closed_since = None
             return
+        self._opened_at = None
         if held is not None:
             return
+        if not ATTACH_AT <= finger < ATTACH_MAX:
+            self._closed_since = None
+        elif self._closed_since is None:
+            self._closed_since = now
+        settled = self._closed_since is not None and now - self._closed_since >= SETTLE_S
         if gripped is None:
             if ATTACH_AT <= finger < ATTACH_MAX:
                 bottle = self._bottle_between_fingers()
@@ -181,11 +213,14 @@ class GraspAssist(Node):
         bottle, z0 = gripped
         with self._lock:
             z = self._poses[bottle][0][2]
-        if z >= z0 + LIFT_TO_ATTACH:
+        on_table = abs(z0 - self.table_top_z) < ON_TABLE_TOLERANCE
+        lifted = z >= z0 + (LIFT_TO_ATTACH_TABLE if on_table else LIFT_TO_ATTACH)
+        if settled or lifted:
             self._attach[bottle].publish(Empty())
             with self._lock:
                 self._held = bottle
-            self.get_logger().info(f"{bottle} lifted: attached")
+            how = "lifted" if lifted else "fingers closed on it"
+            self.get_logger().info(f"{bottle} {how}: attached")
 
 
 def main():
