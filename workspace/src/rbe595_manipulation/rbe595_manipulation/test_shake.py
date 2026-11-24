@@ -18,9 +18,9 @@ from rbe595_manipulation.shake import shake
 from rbe595_manipulation._orientation import rpy_to_quaternion
 from rbe595_manipulation.gripper_client_actual import GripperClient
 
-TWIST_DEG = -150.0    # flip the sign to twist the other way
-WIGGLE_M = 0.01     # 1 cm each side of center
-ITERATIONS = 1
+TWIST_DEG = -150.0   
+WIGGLE_M = 0.01    
+ITERATIONS = 3
 
 from rclpy.action import ActionClient
 from sensor_msgs.msg import JointState
@@ -30,6 +30,9 @@ from trajectory_msgs.msg import JointTrajectoryPoint
 # Adjust to your controller's action name
 TRAJ_ACTION = "/joint_trajectory_controller/follow_joint_trajectory"
 LAST_JOINT = "joint_6"
+FORWARD_RPY_A = (0.0, math.pi / 2.0, 0.0)
+FORWARD_RPY = (0.0, -math.pi / 2.0, math.pi)    # same heading, rolled 180 deg
+JOINT_LIMITS_DEG = {"joint_6": (-160.0, 160.0)}   # verify against your URDF
 
 class WristRotator:
     def __init__(self, node):
@@ -40,9 +43,28 @@ class WristRotator:
 
     def _cb(self, msg):
         self.latest = msg
+    
 
-    def rotate_last_joint(self, offset_deg, duration_s=4.0):
-        import time
+    def _min_jerk_traj(self, joint_names, start, idx, delta_rad, duration_s, dt=0.05):
+        """Single smooth trajectory: only joint `idx` moves, others hold still."""
+        n = max(2, int(math.ceil(duration_s / dt)))
+        pts = []
+        for k in range(1, n + 1):
+            tau = k / n
+            s    = 10*tau**3 - 15*tau**4 + 6*tau**5            # position fraction
+            sdot = (30*tau**2 - 60*tau**3 + 30*tau**4) / duration_s
+            pos = list(start)
+            vel = [0.0] * len(joint_names)
+            pos[idx] = start[idx] + delta_rad * s
+            vel[idx] = delta_rad * sdot
+            pt = JointTrajectoryPoint()
+            pt.positions = pos
+            pt.velocities = vel
+            pt.time_from_start = Duration(seconds=tau * duration_s).to_msg()
+            pts.append(pt)
+        return pts
+
+    def rotate_last_joint(self, offset_deg, duration_s=2.5):
         t0 = time.time()
         while self.latest is None and time.time() - t0 < 5.0:
             time.sleep(0.05)
@@ -54,33 +76,55 @@ class WristRotator:
             return False
 
         pos = dict(zip(self.latest.name, self.latest.position))
-        arm_joints = [n for n in self.latest.name if n.startswith("joint_")]  # excludes gripper joints
-        if LAST_JOINT not in pos:
-            self.node.get_logger().error(f"{LAST_JOINT} not in joint_states: {list(pos)}")
-            return False
+        arm_joints = [n for n in self.latest.name if n.startswith("joint_")]
+        idx = arm_joints.index(LAST_JOINT)
+        start = [pos[n] for n in arm_joints]
 
-        target = [pos[n] for n in arm_joints]
-        target[arm_joints.index(LAST_JOINT)] += math.radians(offset_deg)
+        # clamp to joint limits
+        lo, hi = JOINT_LIMITS_DEG[LAST_JOINT]
+        start_deg = math.degrees(start[idx])
+        goal_deg = max(lo, min(hi, start_deg + offset_deg))
+        delta = math.radians(goal_deg - start_deg)
+        if abs(goal_deg - (start_deg + offset_deg)) > 1e-6:
+            self.node.get_logger().warn(f"clamped {start_deg + offset_deg:.1f} -> {goal_deg:.1f} deg")
+
+        peak_v = 1.875 * abs(delta) / duration_s      # rad/s
+        peak_a = 5.77 * abs(delta) / duration_s**2    # rad/s^2
+        self.node.get_logger().info(
+            f"{LAST_JOINT}: {start_deg:.1f} -> {goal_deg:.1f} deg in {duration_s:.2f}s "
+            f"(peak {peak_v:.2f} rad/s, {peak_a:.1f} rad/s^2)")
 
         goal = FollowJointTrajectory.Goal()
         goal.trajectory.joint_names = arm_joints
-        pt = JointTrajectoryPoint()
-        pt.positions = target
-        pt.velocities = [0.0] * len(arm_joints)
-        pt.time_from_start = Duration(seconds=duration_s).to_msg()
-        goal.trajectory.points = [pt]
+        goal.trajectory.points = self._min_jerk_traj(arm_joints, start, idx, delta, duration_s)
 
         send_future = self.client.send_goal_async(goal)
+        t0 = time.time()
         while not send_future.done():
-            time.sleep(0.02)
+            if time.time() - t0 > 5.0:
+                self.node.get_logger().error("timed out sending goal")
+                return False
+            time.sleep(0.01)
         handle = send_future.result()
         if not handle.accepted:
-            self.node.get_logger().error("goal rejected (check joint limits)")
+            self.node.get_logger().error("goal rejected")
             return False
+
         res_future = handle.get_result_async()
+        t0 = time.time()
         while not res_future.done():
-            time.sleep(0.02)
-        return res_future.result().result.error_code == 0
+            if time.time() - t0 > duration_s + 5.0:
+                self.node.get_logger().error("result timeout, cancelling")
+                handle.cancel_goal_async()
+                return False
+            time.sleep(0.01)
+        res = res_future.result().result
+        if res.error_code != 0:
+            self.node.get_logger().error(f"controller error {res.error_code}: {res.error_string}")
+            return False
+        return True
+
+ 
 
 
 def quat_to_rot(x, y, z, w):
@@ -178,39 +222,55 @@ def run_twist(arm, gripper, log, xyz, rpy, iter):
         #gripper.open()
         #gripper.move_to(0.0)
 
-# def run_wrist_twist(arm, gripper, wrist, tf_buffer, log, iters):
-#     rolled = False
-#     center = None
-#     try:
-#         if not gripper.move_to(0.7):
-#             log.error("gripper close failed")
-#             return False
 
-#         if not wrist.rotate_last_joint(TWIST_DEG):
-#             log.error("wrist roll failed")
-#             return False
-#         rolled = True
+def move_to_forward(arm, tf_buffer, log, xyz, roll_deg=0.0, check=True):
+    """Move EE to `xyz` (world frame) with the gripper level and pointing straight forward.
 
-#         # pose AFTER the roll, so wiggles hold the real rolled orientation
-#         xyz, rpy = current_ee_pose_world(tf_buffer)
-#         center = (xyz, rpy)
+    roll_deg rotates the gripper about its own approach axis, in case your
+    fingers need to open vertically instead (e.g. 90).
+    """
+    rpy = FORWARD_RPY if roll_deg == 0.0 else twisted_rpy(FORWARD_RPY, roll_deg)
 
-#         for _ in range(iters):
-                    
-#             if not arm.move_to((xyz[0], xyz[1] + WIGGLE_M, xyz[2]), rpy):
-#                 log.error("wiggle move failed")
-#                 return False
-#             arm.move_to(*center)
-            
-#         return True
-#     finally:
-#         # # always recenter, then roll back, even after a failure
-#         # if center is not None:
-#         #     arm.move_to(*center)
-#         if rolled:
-#             wrist.rotate_last_joint(-TWIST_DEG)
+    if not arm.move_to(tuple(xyz), rpy):
+        log.error(f"move_to_forward failed for xyz={xyz}")
+        return False
+
+    if check:
+        # finger_axis=1 -> tool y horizontal; if you pass roll_deg=90, use finger_axis=0
+        finger_axis = 1 if roll_deg % 180 == 0 else 0
+        if not check_level_forward(tf_buffer, log, finger_axis=finger_axis):
+            log.warn("arrived, but orientation is outside tolerance")
+            return False
+    return True
 
 
+def probe_forward(arm, tf_buffer, log, target_xyz=None):
+    """Find which orientation/position is the problem."""
+    xyz, rpy = current_ee_pose_world(tf_buffer)
+    log.info(f"current world xyz={xyz} rpy={rpy}")
+
+    # 1) Position only: current orientation, target xyz
+    if target_xyz is not None:
+        ok = arm.move_to(tuple(target_xyz), rpy)
+        log.info(f"target xyz, CURRENT orientation -> {ok}")
+        if ok:
+            xyz, rpy = current_ee_pose_world(tf_buffer)  # now at target
+        else:
+            log.warn("position itself is likely unreachable/in collision; "
+                     "try a closer xyz (e.g. in front of the base, z ~ 0.2-0.4 above base)")
+
+    # 2) Orientation only: current xyz, candidate forward orientations
+    candidates = {
+        "pitch +90": (0.0,  math.pi / 2, 0.0),
+        "pitch -90": (0.0, -math.pi / 2, 0.0),
+        "pitch +90 roll 90": (math.pi / 2,  math.pi / 2, 0.0),
+        "pitch +90 roll -90": (-math.pi / 2, math.pi / 2, 0.0),
+        "pitch +89": (0.0, math.radians(89.0), 0.0),  # avoids exact gimbal lock
+    }
+    for name, c in candidates.items():
+        ok = arm.move_to(xyz, c)
+        level = check_level_forward(tf_buffer, log) if ok else False
+        log.info(f"{name}: planned={ok} level_forward={level}")
 
 def run_wrist_twist(arm, gripper, wrist, tf_buffer, log, iters, close_gripper=True):
     # pose BEFORE anything moves: this is the known-good level/forward pose
@@ -250,6 +310,36 @@ def run_wrist_twist(arm, gripper, wrist, tf_buffer, log, iters, close_gripper=Tr
         if rolled:
             wrist.rotate_last_joint(-TWIST_DEG)
             time.sleep(0.5)  # let the joint settle before reading/planning
+        if not arm.move_to(start_xyz, start_rpy):
+            log.error("stabilize move failed; check orientation manually")
+        else:
+            log.info("stabilized to start pose")
+
+def run_wrist_twist_pipeline(arm, gripper, wrist, tf_buffer, log, iters, close_gripper=True):
+    # pose BEFORE anything moves: this is the known-good level/forward pose
+    start_xyz, start_rpy = current_ee_pose_world(tf_buffer)
+    rolled = False
+    center = None
+    
+    try:
+        for _ in range(iters):
+
+            if not wrist.rotate_last_joint(TWIST_DEG):
+                log.error("wrist roll failed")
+                return False
+            rolled = True
+
+            wrist.rotate_last_joint(-TWIST_DEG)
+            time.sleep(0.5)  # let the joint settle before reading/planning
+        return True
+
+   
+    
+
+ 
+    finally:
+        # roll back by dead reckoning, then correct the residual error with MoveIt
+        
         if not arm.move_to(start_xyz, start_rpy):
             log.error("stabilize move failed; check orientation manually")
         else:
@@ -354,6 +444,14 @@ def main(args=None):
             input("Shake Done, enter to open. Enter...")
             open_gripper(arm, gripper, log, xyz, rpy)
 
+        elif mode == "goto":
+            if len(sys.argv) < 5:
+                log.error("usage: goto X Y Z   (world frame, meters)")
+                return
+            xyz = tuple(float(v) for v in sys.argv[2:5])
+            input(f"Move to {xyz} gripper forward. Area clear, e-stop in reach. Enter...")
+            log.info(f"goto result: {move_to_forward(arm, tf_buffer, log, xyz)}")
+
         elif mode == "test":
             if not check_level_forward(tf_buffer, log):
                 log.error("gripper not level/forward; aborting")
@@ -371,6 +469,23 @@ def main(args=None):
             log.info(f"wrist twist result: {run_wrist_twist(arm, gripper, wrist, tf_buffer, log, ITERATIONS)}")
             input("Done. Enter to open gripper...")
             gripper.move_to(0.0)
+
+        elif mode == "wrist_pipeline":
+
+            xyz = [0.0, 0.0, 1.0]
+            input(f"Move to {xyz} gripper forward. Area clear, e-stop in reach. Enter...")
+            log.info(f"goto result: {move_to_forward(arm, tf_buffer, log, xyz)}")
+            
+            if not check_level_forward(tf_buffer, log):
+                log.error("gripper not level/forward; aborting")
+                return
+            
+            #input("Close gripper, roll, wiggle, roll back. Area clear, e-stop in reach. Enter...")
+            log.info(f"wrist twist result: {run_wrist_twist_pipeline(arm, gripper, wrist, tf_buffer, log, ITERATIONS)}")
+            input("Done. Enter to open gripper...")
+            gripper.move_to(0.0)
+
+        
         else:
             log.error(f"unknown mode {mode!r}; use 'here' or 'bowl'")
     except KeyboardInterrupt:
