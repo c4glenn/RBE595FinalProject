@@ -61,3 +61,7 @@ underlay_ws/src/*
 # OS / Python cruft
 .DS_Store
 __pycache__/
+
+# real_robot: run outputs and the downloaded OCR model
+real_robot/captures/
+real_robot/models/

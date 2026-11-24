@@ -1,0 +1,60 @@
+# Real-robot settings for helpers/circle_detector.py.
+# All positions/heights in base_link (metres). Heights measured with height_map on
+# captures/snap (arm at view 0).
+
+birdseye:
+  resolution: 0.001          # metres per top-down pixel (1 mm)
+  x_range: [0.10, 0.72]      # area of the table to warp, in base_link
+  y_range: [-0.80, 0.30]
+
+bottle:                      # shaker lids
+  mask: height               # lid tops are the only surfaces at this height
+  open_kernel: 5             # px; morphological open removes specks (lids are solid discs)
+  diameter: 0.050            # lid diameter -- MEASURE with a ruler
+  height: 0.074              # shaker height (only used by the body check, which is off)
+  top_z: 0.040               # lid-top height: measured 0.038-0.043 depending on where on the table
+  height_band: 0.012         # +-12 mm: covers that drift; the rack top is ~60 mm lower
+  min_edge_support: 0.6      # shiny lid + paper label: weaker outline (measured 0.67-1.0)
+  hsv_ranges: [{lower: [0, 0, 150], upper: [179, 60, 255]}]   # only used with mask: colour
+
+# holder: NOT used by tools/grasp_pipeline.py any more -- it finds the holder from its AprilTag
+# (april_tag_servo.STAND_TAG_ID). Kept for running helpers/circle_detector.py standalone.
+holder:                      # the regrasp stand's cup (its column top is a thin ring)
+  mask: height
+  open_kernel: 0             # 0 = no open: it would erase the thin ring
+  min_edge_support: 0.4      # its outline is lumpy (the height band also catches the lead-in and
+                             # the outer wall's top), so less of a perfect circle edge (measured 0.56)
+  diameter: 0.064            # column-top outer diameter -- MEASURE (CAD says 64 mm)
+  height: 0.055
+  top_z: 0.016               # column-top height: measured 0.013-0.022 depending on where on the table
+  height_band: 0.012
+  hsv_ranges: [{lower: [95, 80, 50], upper: [125, 255, 255]}]
+
+bowl:                        # the real grey bowl
+  mask: colour               # 'not the table' colour; its thin metal rim is weak in depth
+  open_kernel: 5
+  diameter: 0.21             # outer edge as seen from above (measured 210 mm from the snapshot)
+  height: 0.045
+  top_z: -0.004              # rim-top height, measured
+  height_band: 0.008
+  min_edge_support: 0.5      # measured 0.60 under bluish light
+  # Anything that is NOT the orange table (hue 15-21 in every snapshot). Saturation does not work:
+  # the camera's auto white balance moves the bowl from S~26 to S~65 between snapshots, overlapping
+  # the table. The rack/holder pass this mask too, but they are not 21 cm circles.
+  hsv_ranges:
+    - {lower: [0, 0, 60], upper: [8, 255, 255]}
+    - {lower: [32, 0, 60], upper: [179, 255, 255]}
+
+hough:
+  radius_tolerance: 0.15     # search radius = diameter/2 * (1 +- this)
+  duplicate_dist_factor: 0.3
+  min_dist_factor: 0.9
+  body_check_min_offset: 100 # effectively OFF: with a height mask there is no side smear
+  dp: 1.0
+  canny_high: 100
+  accumulator_threshold: 12
+  blur_kernel: 5
+  min_fill: 0.6
+  min_edge_support: 0.7
+
+row_tolerance: 0.5

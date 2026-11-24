@@ -1,0 +1,38 @@
+robot_ip: 192.168.1.10
+
+# Hand-eye calibration: 19 samples, mean consistency 4.4 mm, max 7.6 mm.
+# Full result: config/hand_eye_result.txt
+# hand_eye:
+#   parent: end_effector_link
+#   child: camera_link
+#   translation: [-0.06227, 0.00312, 0.05285]          # x, y, z (m)
+#   rotation: [-0.001460, -0.703670, 0.006738, 0.710493]  # qx, qy, qz, qw
+hand_eye:
+  parent: end_effector_link
+  child: camera_link
+  translation: [0.06303, -0.01041, 0.05261]
+  rotation: [0.727671, 0.001117, 0.685837, 0.010979]   # qx, qy, qz, qw
+
+base_frame: base_link
+ee_link: end_effector_link
+cloud_topic: /camera/camera/depth/color/points
+settle_time: 5.0          
+frames_per_view: 5        
+speed: 0.1                
+motion: rrtconnect         
+cartesian_fallback: false 
+view_voxel: 0.002         
+max_depth: 0.50
+
+workspace:
+  x: [0.10, 0.80]
+  y: [-0.50, 0.50]
+  z: [-0.30, 0.40]
+
+
+views:
+  - [0.329, -0.017, 0.390, 1.000, -0.017, -0.014, -0.012]    # view 0: [x, y, z, qx, qy, qz, qw]
+  - [0.344, 0.183, 0.411, 0.990, -0.021, -0.034, 0.138]    # view 1:[x, y, z, qx, qy, qz, qw]
+
+# Home: 
+home: [0.329, -0.017, 0.391, 1.000, -0.017, -0.012, -0.011]  # [x, y, z, qx, qy, qz, qw]
