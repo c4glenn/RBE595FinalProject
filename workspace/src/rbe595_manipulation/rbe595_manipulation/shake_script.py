@@ -26,9 +26,10 @@ from trajectory_msgs.msg import JointTrajectoryPoint
 
 # --- SHAKE CONTROLS ---
 TWIST_DEG = -150.0 
-ITERATIONS = 3 #number of wrist twists (abotu 2-3g per twist from experiments)
+ITERATIONS = 3 #number of wrist twists (abotu 2-3g per twist from experiments with medium holes)
 BOWL_Z_POS = [0.0, 0.0, 1.0] # position of the end effecto over the bowl (will be updated by bowl detection service)
 FORWARD_RPY = (0.0, -math.pi / 2.0, math.pi)    # should point gripper straight forward with camera up
+TWIST_TIMING = 3.5 # seconds
 # ----------------------
 
 # Joint controlling action name
@@ -70,7 +71,7 @@ class WristRotator:
             pts.append(pt)
         return pts
 
-    def rotate_last_joint(self, offset_deg, duration_s=2.5):
+    def rotate_last_joint(self, offset_deg, duration_s):
         t0 = time.time()
         while self.latest is None and time.time() - t0 < 5.0:
             time.sleep(0.05)
@@ -239,12 +240,12 @@ def run_wrist_twist_pipeline(arm, gripper, wrist, tf_buffer, log, iters, close_g
     try:
         for _ in range(iters):
 
-            if not wrist.rotate_last_joint(TWIST_DEG):
+            if not wrist.rotate_last_joint(TWIST_DEG, TWIST_TIMING):
                 log.error("wrist roll failed")
                 return False
             rolled = True
 
-            wrist.rotate_last_joint(-TWIST_DEG)
+            wrist.rotate_last_joint(-TWIST_DEG, TWIST_TIMING)
             time.sleep(0.5)  # let the joint settle before reading/planning
         return True
  
