@@ -5,7 +5,7 @@ arm and wrist RealSense D405. What changed from the sim:
 
 | | Sim (tran) | Real (here) |
 |---|---|---|
-| Salt jar | cap AprilTag 0-5 | no tag: "salt" written on it, its round lid found with **Hough circles** on the colour image seen top-down at the lid height (like main's `circle_detector.py`; works on a shiny lid with no depth), the depth as a fallback |
+| Salt jar | cap AprilTag 0-5 | no tag: picked by its paper label (OCR, see *Which jar*; `--index N` for the old ID way), its round lid found with **Hough circles** on the colour image seen top-down at the lid height (like main's `circle_detector.py`; works on a shiny lid with no depth), the depth as a fallback |
 | Rack | tags 6, 7 | tags 6, 7 (same) |
 | Regrasp stand | tag 8 | tag 8 only (no Hough): the jar's place = tag + the stand's shape |
 | Motion | `ArmMoveClient` (MoveGroup) | HW7 `helpers/robot_motion.py` `ArmMover`: straight lines with `compute_cartesian_path`, free moves with RRTConnect |
@@ -99,10 +99,11 @@ Logs: `real/captures/logs/`. Go one level at a time.
 
 | Command | What it does |
 |---|---|
-| `spice vision` | level 0, no motion: tags 6, 7, 8, cyan predicted stand pocket, yellow salt lid (`q` quit, `s` save) |
+| `spice vision` | level 0, no motion: tags 6, 7, 8, cyan predicted stand pocket, yellow lids, their labels and the target lid (`q` quit, `s` save) |
 | `spice dry` | no motion: what it sees + every pose it would go to |
 | `spice level1` | level 1: pick the jar out of the rack, put it back (steps 1, 2, 8) |
 | `spice full` | the whole task, steps 1-8 with the shake over the bowl (`spice full --steps 1-4,6-8`: without it) |
+| `spice pourtest` | the whole task, but step 5 tips slowly until you press a key when it pours; the angle goes to `real/data/pour_tests.csv` (see *Pour test*) |
 | `spice resume 4,6,7,8` | carry on from the last run's saved state after fixing a failure |
 | `spice home` | get the arm home safely from where a run stopped: open (if empty), back out along the approach (holding the jar: straight up), up to z 0.25, then a planned move home. A failed step, `q` after a pause or Ctrl-C asks the same (`[y/N]`), and the robot bringup does it too before its own home move |
 | (automatic, step 1) find the bowl | no tag, so found anywhere on the table by its rim (`spice_task/bowl.py`): the survey picture is warped onto a horizontal plane (rim = true circle), `cv2.HoughCircles` finds circles of `bowl.diameter_range`, and the depth decides which is a bowl (rim raised `min_height` above the table, inside `min_depth` lower than the rim; a printed ring, plate or lid is not). The rim height is measured and the warp redone at it. Then the camera goes right above it and measures again with the whole rim in view. Kept in the state (`bowl`: rim centre + radius) for pouring, drawn in RViz and put in MoveIt's scene. Not seen: step 1 goes on with a warning (set `bowl_look`, or put it in the survey view) |
@@ -142,10 +143,47 @@ The Kinova driver is looked for in `$KORTEX_WS`, then `underlay_ws/install`, the
 
 **Next levels (not done yet):**
 
-- Level 3: several jars in the rack, pick the one that says "salt". Now, with more than one lid
-  in view, `--index N` picks lid N from `captures/<time>/*survey_lids.png`; reading the label
-  is the next thing to add.
 - Level 4: step 5, shake over the bowl (in: the bowl from step 1, `pour:` in `config/real.yaml`).
+- Per-spice amounts: tilt -> grams for each spice from `spice pourtest` data plus a scale.
+
+## Which jar: labels (default) or ID
+
+Each jar has a paper label with its name ("salt", "pepper", ...). In step 1 the survey picture's
+labels are read with OCR (`helpers/spice_ocr.py`: CRNN text recognizer, every known name scored in
+all 4 rotations; model `real/models/crnn_en.onnx`, 33 MB, downloaded on first use and not in git).
+`spice_task/labels.py` gives each label to the lid it sits on (within `labels.max_dist`, 5 cm, on the
+lid plane) and picks the target:
+
+| Mode | How | Picks |
+|---|---|---|
+| label (default) | `spice level1`, `spice full --spice pepper` | the lid whose label reads the spice (`labels.spice` in `config/real.yaml`, salt). None or two match: step 1 stops and says what it read. One lid in view and its label not read: that lid, with a warning |
+| ID | `spice level1 --index 1` | lid N in reading order (rows top to bottom, left to right in the image; the numbers are in the log's `lids at height` line and in `spice vision`'s `lids:` line); labels only shown |
+
+`spice vision` shows the labels (green: read and on a lid, orange: read but on no lid; text it cannot
+read is not drawn) and the target lid (green circle); the top text says `lids: 0 oregano, 1 cumin, ...`.
+`--captions` writes `lid N <spice> / z` under each lid too (`labels.captions: true` in the config: also
+in the task's pictures). `--spice NAME`, `--index N` and `--no-labels` work there too. The names a label can read are `labels.spices`; add a new spice there (a-z, 0-9 only).
+Tests: `python3 -m pytest real/test/test_labels.py real/test/test_spice_ocr.py`.
+
+## Pour test: at what tilt does a spice start pouring?
+
+First step towards a per-spice "tilt -> grams" table (e.g. salt 5 deg -> 1 g, parsley 15 deg -> 1 g):
+find where each spice starts coming out.
+
+```bash
+spice pourtest                    # the whole task; step 5 is the test (salt by default; --spice NAME)
+spice resume 5,6,7,8 --pour-test  # again, from a run that stopped with the jar held side-on
+```
+
+Step 5 then carries the side-held jar upright over the bowl, turns the wrist (joint_6 only) to
+`pour.test_start_deg` (60) at once, then `pour.test_step_deg` (2) at a time, keeping still
+`pour.test_dwell` (1.5 s) after each step. **Press any key the moment it pours**: it stops, measures the
+tilt on joint_6, appends a line to `real/data/pour_tests.csv` (time, spice, `pour_angle_deg`, the
+step settings, the run folder, an empty `notes` column for you), turns the jar upright and goes on
+with steps 6-8. No key up to `pour.test_max_deg` (145): recorded with an empty angle (did not pour).
+The angle is good to one step (it started between the last two commanded angles; the log says
+which). Ctrl-C stops everything as usual. Keys only mean "it pours" during the tilting; before and
+after it they pause the arm as usual.
 
 ## Seeing what the robot sees (RViz)
 

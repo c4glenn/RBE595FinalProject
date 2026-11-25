@@ -6,6 +6,8 @@ Draws, on the wrist camera image, about once a second:
   * the predicted stand pocket rim (cyan) from tag 8 -- it must sit on the stand's cup; if it is
     off to one side, fix stand.pocket_angle_deg / tag_to_pocket in config/real.yaml;
   * every Hough-circle lid (yellow) at the rack's lid height (or the highest lid-sized surface);
+  * the paper labels read with OCR (green: on a lid, orange: read but on no lid, red: not read)
+    and the lid the task would fetch (--spice, default labels.spice; --index N: ID mode);
   * in red, why a tag that is in the picture was not used (e.g. its edge does not measure the
     size in tags.sizes), and why no lid was found.
 Prints the numbers. Keys in the window: q = quit, s = save the picture to real/captures/vision/.
@@ -30,6 +32,7 @@ import yaml                                                    # noqa: E402
 from helpers.robot_motion import ArmMover                      # noqa: E402
 from spice_task import task_poses as tp                        # noqa: E402
 from spice_task.config_file import set_line                    # noqa: E402
+from spice_task import labels as spice_labels                  # noqa: E402
 from spice_task.io_node import TaskIO, spin_in_background      # noqa: E402
 from spice_task.lid_detector import LidDetector, draw_circle   # noqa: E402
 from spice_task.tags import draw_tags, measure_tags            # noqa: E402
@@ -46,6 +49,10 @@ def main():
     p.add_argument('--pose', choices=['survey', 'home', 'stand_look'], help='move there first (asks)')
     p.add_argument('--top-z', type=float, help='lid-top height to cut at (default: from the rack tags, else auto)')
     p.add_argument('--once', action='store_true', help='one picture, saved, no window')
+    p.add_argument('--spice', help='the label to look for (default: labels.spice in the config)')
+    p.add_argument('--index', type=int, help='ID mode: show lid N as the target instead of by its label')
+    p.add_argument('--no-labels', action='store_true', help='do not read the labels (faster)')
+    p.add_argument('--captions', action='store_true', help='write "lid N <spice> / z" under each lid')
     args = p.parse_args()
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
@@ -60,6 +67,9 @@ def main():
     t = cfg['tags']
     ids = list(t['rack_ids']) + [t['stand_id']]
     sizes = {int(k): float(v) for k, v in t['sizes'].items()}
+    lc = cfg.get('labels') or {}
+    spice = (args.spice or lc.get('spice') or '').lower() or None
+    captions = args.captions or bool(lc.get('captions'))
     out_dir = os.path.join(ROOT, 'captures', 'vision')
     try:
         ready, why = io.wait_ready()
@@ -149,9 +159,27 @@ def main():
                 lines.append((f"stand: tag {t['stand_id']} not detected in the image", (0, 0, 255)))
             res = detector.detect(depth, io.K, io.D, T_base_cam, T_base_ee=io.ee_pose(), top_z=top_z,
                                   region=region, image=image)
+            res.lids.sort(key=lambda lid: (round(lid.pixel[1] / 60.0), lid.pixel[0]))   # as the task numbers them
+            if not args.no_labels:
+                pairs = spice_labels.assign_labels(res.lids, spice_labels.get_reader(lc).read(image), T_base_cam,
+                                                   io.K, io.D, lc.get('max_dist', 0.05))
+                spice_labels.draw_labels(pic, pairs, res.lids)
+                stray = [l.name for l, lid in pairs if l.name and lid is None]
+                lines.append(('lids: ' + (', '.join(f'{k} {lid.label or "?"}' for k, lid in enumerate(res.lids))
+                                          or 'none') + (f'   (on no lid: {", ".join(stray)})' if stray else ''),
+                              (0, 200, 0)))
+            target = None
+            if res.lids:
+                try:
+                    target, why = spice_labels.choose_lid(res.lids, spice, args.index)
+                    lines.append((f'target: {why}', (0, 255, 0)))
+                except ValueError as e:
+                    lines.append((f'target: {e}'[:110], (0, 0, 255)))
             for k, lid in enumerate(res.lids):
-                draw_circle(pic, lid.center, lid.radius, T_base_cam, io.K, io.D, (0, 255, 255),
-                            f'lid {k} z {lid.center[2]:+.3f}')
+                draw_circle(pic, lid.center, lid.radius, T_base_cam, io.K, io.D,
+                            (0, 255, 0) if lid is target else (0, 255, 255),
+                            spice_labels.lid_caption(k, lid, lid is target) if captions else None,
+                            thickness=3 if lid is target else 2, below=True)
             z = f'{res.top_z:+.4f}' if np.isfinite(res.top_z) else 'n/a'
             lines.append((f'{len(res.lids)} lid(s) at height {z} ({res.method})' if res.lids else
                           f'0 lids at height {z}', (0, 255, 255)))

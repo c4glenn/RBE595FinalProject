@@ -37,6 +37,8 @@ class Lid:
     fill: float
     support: float
     pixel: tuple = (0.0, 0.0)  # centre in the camera image (for drawing)
+    label: str = None          # spice name read on its paper label (labels.py), None = not read
+    label_score: float = None  # that reading's CTC score (0 = perfect)
 
 
 @dataclass
@@ -397,8 +399,11 @@ class LidDetector:
         return hits / n
 
 
-def draw_circle(image, centre, radius, T_base_cam, K, D, colour, label=None, thickness=2, label_dy=20):
-    """A horizontal circle in base_link drawn on the camera image (in place)."""
+def draw_circle(image, centre, radius, T_base_cam, K, D, colour, label=None, thickness=2, label_dy=20,
+                below=False):
+    """A horizontal circle in base_link drawn on the camera image (in place).
+    below=True: the label (lines split on '\\n') centred under the circle (above it if there is no
+    room), so captions of circles side by side do not run into each other."""
     a = np.linspace(0, 2 * np.pi, 60)
     ring = np.column_stack((centre[0] + radius * np.cos(a), centre[1] + radius * np.sin(a),
                             np.full_like(a, centre[2])))
@@ -406,7 +411,18 @@ def draw_circle(image, centre, radius, T_base_cam, K, D, colour, label=None, thi
     cv2.polylines(image, [px], True, colour, thickness, cv2.LINE_AA)
     c = project(centre, T_base_cam, K, D)[0].astype(int)
     cv2.drawMarker(image, tuple(int(v) for v in c), colour, cv2.MARKER_CROSS, 14, 2)
-    if label:
+    if label and below:
+        font, scale, lh = cv2.FONT_HERSHEY_SIMPLEX, 0.55, 20
+        lines = label.split('\n')
+        y = int(px[:, 1].max()) + lh
+        if y + lh * (len(lines) - 1) > image.shape[0] - 4:          # no room under it: above
+            y = int(px[:, 1].min()) - 8 - lh * (len(lines) - 1)
+        for k, line in enumerate(lines):
+            w = cv2.getTextSize(line, font, scale, 2)[0][0]
+            org = (int(np.clip(c[0] - w // 2, 2, image.shape[1] - w - 2)), y + k * lh)
+            cv2.putText(image, line, org, font, scale, (0, 0, 0), 4, cv2.LINE_AA)
+            cv2.putText(image, line, org, font, scale, colour, 2, cv2.LINE_AA)
+    elif label:
         org = (int(c[0]) + 12, int(c[1]) + label_dy)
         cv2.putText(image, label, org, cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 4)
         cv2.putText(image, label, org, cv2.FONT_HERSHEY_SIMPLEX, 0.6, colour, 2)

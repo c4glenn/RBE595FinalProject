@@ -43,10 +43,13 @@ from spice_task import reference as ref
 from spice_task.bowl import detect_bowl
 from spice_task import task_poses as tp
 from spice_task.config_file import set_line
+from spice_task import labels as spice_labels
 from spice_task.lid_detector import LidDetector, draw_circle
 from spice_task.tags import draw_tags, measure_tags
 
 ARM_JOINTS = [f'joint_{i}' for i in range(1, 7)]
+POUR_TESTS_CSV = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data',
+                              'pour_tests.csv')   # spice pourtest results (kept in git)
 JOINT6_LIMIT = 2.6                     # rad, URDF (+-149 deg)
 STEP_NAMES = {1: 'find_jar', 2: 'grasp_top', 3: 'place_on_stand', 4: 'regrasp_side',
               5: 'shake_over_bowl', 6: 'return_to_stand', 7: 'regrasp_top', 8: 'return_to_rack'}
@@ -67,9 +70,12 @@ def fmt(v):
 
 class Task:
     def __init__(self, io, mover, cfg, out_dir, auto=False, dry_run=False, show=False, index=None,
-                 config_path=None):
+                 config_path=None, spice=None, pour_test=False):
         self.io, self.mover, self.cfg, self.config_path = io, mover, cfg, config_path
         self.out_dir, self.auto, self.dry, self.show, self.index = out_dir, auto, dry_run, show, index
+        # label mode (default): the jar whose paper label reads this; index mode: --index N
+        self.spice = (spice or (cfg.get('labels') or {}).get('spice') or '').lower() or None
+        self.pour_test = pour_test         # step 5: tip slowly until a key says it pours (pour_test())
         self.pause = None                  # helpers/key_pause.KeyPause (run_task.py): any key pauses
         self.detector = LidDetector(cfg['lid_detection'], cfg['jar']['lid_diameter'])
         self.state = {}
@@ -296,8 +302,9 @@ class Task:
         self.save_picture(label, picture)
         return tags
 
-    def look_lids(self, top_z, around=None, label='lid', region=None):
-        """All lids the camera sees (a still snapshot), near `around` or inside `region`."""
+    def look_lids(self, top_z, around=None, label='lid', region=None, read_labels=False):
+        """All lids the camera sees (a still snapshot), near `around` or inside `region`.
+        read_labels: also read the paper labels (OCR) and set each lid's .label."""
         c = self.cfg['lid_detection']
         snap = self.io.snapshot(c['depth_frames'])
         if snap is None:
@@ -310,9 +317,21 @@ class Task:
             cv2.imwrite(os.path.join(self.out_dir, f'{self.picture_no:02d}_{label}_topdown.png'), result.birdseye)
         picture = image.copy()
         result.lids.sort(key=lambda lid: (round(lid.pixel[1] / 60.0), lid.pixel[0]))   # reading order
+        if read_labels and result.lids:
+            lc = self.cfg.get('labels') or {}
+            read = spice_labels.get_reader(lc).read(image)
+            pairs = spice_labels.assign_labels(result.lids, read, T_base_cam, self.io.K, self.io.D,
+                                               lc.get('max_dist', 0.05))
+            spice_labels.draw_labels(picture, pairs, result.lids)
+            unread = sum(l.name is None for l, _ in pairs)
+            self.log('labels read: ' + (', '.join(
+                f'"{l.name}" (score {l.score:.2f}) -> ' +
+                (f'lid {next(k for k, o in enumerate(result.lids) if o is lid)}' if lid is not None else 'no lid')
+                for l, lid in pairs if l.name) or 'none') + (f'; {unread} unreadable text patch(es)' if unread else ''))
         for k, lid in enumerate(result.lids):
             draw_circle(picture, lid.center, lid.radius, T_base_cam, self.io.K, self.io.D, YELLOW,
-                        f'lid {k}  z {lid.center[2]:+.3f}')
+                        spice_labels.lid_caption(k, lid) if (self.cfg.get('labels') or {}).get('captions') else None,
+                        below=True)
         if around is not None:
             draw_circle(picture, [around[0], around[1], result.top_z if np.isfinite(result.top_z) else 0.0],
                         0.004, T_base_cam, self.io.K, self.io.D, MAGENTA, 'expected')
@@ -322,7 +341,8 @@ class Task:
             {'type': 'text', 'pos': lid.center + [0, 0.04, 0.01], 'text': f'lid {k}', 'rgba': M_LID})])
         z = f'{result.top_z:+.4f}' if np.isfinite(result.top_z) else 'n/a'
         self.log(f'lids at height {z} ({result.method or "-"}): ' + (', '.join(
-            f'{k}: {fmt(lid.center)} r {1000 * lid.radius:.1f} mm (depth {lid.fill:.2f}, edge {lid.support:.2f})'
+            f'{k}' + (f' "{lid.label}"' if lid.label else '') +
+            f': {fmt(lid.center)} r {1000 * lid.radius:.1f} mm (depth {lid.fill:.2f}, edge {lid.support:.2f})'
             for k, lid in enumerate(result.lids)) or f'none ({result.reason})'))
         return result
 
@@ -625,19 +645,18 @@ class Task:
 
         # only on the rack: the stand's empty cup is round too
         region = tp.rack_region(rack, cfg) if rack is not None else None
-        result = self.look_lids(top_z, label='survey_lids', region=region)
+        # index mode (--index N) only shows the labels; label mode picks the lid by them
+        result = self.look_lids(top_z, label='survey_lids', region=region, read_labels=True)
         if not result.lids:
-            raise StepFailed(f'no salt lid found from the survey pose: {result.reason}')
-        if len(result.lids) == 1:
-            lid = result.lids[0]
-        elif self.index is not None and 0 <= self.index < len(result.lids):
-            lid = result.lids[self.index]
-        else:
-            raise StepFailed(f'{len(result.lids)} lids seen; pick one with --index N (numbers in '
-                             f'{self.out_dir}/*survey_lids.png)')
+            raise StepFailed(f'no jar lid found from the survey pose: {result.reason}')
+        try:
+            lid, why = spice_labels.choose_lid(result.lids, self.spice, self.index)
+        except ValueError as e:
+            raise StepFailed(f'{e} (lid numbers and labels: the "lids at height" line above, or spice vision --captions)')
         top = lid.center
         self.viz_jar(top)
-        self.log(f'target lid at {fmt(top)}')
+        self.log(f'target lid at {fmt(top)}: {why}')
+        self.state['spice'] = lid.label
         bowl = self.look_bowl('survey_bowl', rack)      # same still picture spot as the lids
 
         self.find_stand(tags)
@@ -1010,11 +1029,14 @@ class Task:
         self.state['held'] = 'side'
 
     # ------------------------------------------------------------------ pouring
-    def pour_place(self, centre):
+    def pour_place(self, centre, angles=None):
         """Pour poses (task_poses.pour_poses) from a direction the arm can reach upright and tipped
-        either way (MoveIt IK, no motion): straight from the base first, then others."""
+        either way (MoveIt IK, no motion): straight from the base first, then others.
+        angles: the tilts (rad) it must reach; default the tilt and both ends of the shake."""
         cfg = self.cfg
         tilt, amp = math.radians(cfg['pour']['tilt_deg']), math.radians(cfg['pour']['shake_deg'])
+        if angles is None:
+            angles = (tilt, tilt + amp, tilt - amp)
         base = tp.heading_to(centre)
         for dh in tp.POUR_HEADINGS_DEG:
             p = tp.pour_poses(centre, cfg, self.camera(), base + math.radians(dh))
@@ -1025,7 +1047,7 @@ class Task:
                 continue
             # which way(s) it can be tipped (tilt and both ends of the shake) without hitting anything
             p['ways'] = [s for s in (1, -1)
-                         if all(self.mover.reachable(tp.turned(p['over'], s * a)) for a in (tilt, tilt + amp, tilt - amp))]
+                         if all(self.mover.reachable(tp.turned(p['over'], s * a)) for a in angles)]
             if p['ways']:
                 if p['raised'] > 0.001:
                     self.log(f'pour: hand {1000 * p["raised"]:.0f} mm higher than pour.above_rim, so the wrist '
@@ -1081,6 +1103,8 @@ class Task:
         pr = self.cfg["pour"]
         centre = np.array(self.state['bowl']['centre'])
         self.log(f'bowl rim centre {fmt(centre)}, diameter {2000 * self.state["bowl"]["radius"]:.0f} mm')
+        if self.pour_test:
+            return self.pour_test_over_bowl(centre)
         p = self.pour_place(centre)
         over = p['over']
         tilt, amp = math.radians(pr['tilt_deg']), math.radians(pr['shake_deg'])
@@ -1101,6 +1125,89 @@ class Task:
             self.turn_wrist(over, q_over, s * (tilt - amp), f'shake {k + 1}/{n} back', ask=False)
         self.turn_wrist(over, q_over, 0.0, 'jar upright again', ask=False)
         self.still_holding('after shaking')
+
+    def carry_over_bowl(self, over):
+        """Up out of the stand (above the rim height), then across to `over`, still upright."""
+        T = self.io.ee_pose()
+        if T[2, 3] < over[2] - 0.005:
+            self.line(tp.as_pose(T[:3, 3] + [0.0, 0.0, over[2] - T[2, 3]], T[:3, :3]), 'up to carrying height')
+        self.free(over, 'carry the jar over the bowl (upright)', holding=True)
+        self.still_holding('carrying it to the bowl')
+
+    def pour_test_over_bowl(self, centre):
+        """Pour test (spice pourtest): over the bowl, turn the wrist to pour.test_start_deg, then
+        pour.test_step_deg at a time, still pour.test_dwell s after each, until a key is pressed
+        (it is pouring) or pour.test_max_deg. The angle (measured on joint_6) goes to
+        real/data/pour_tests.csv; then the jar is turned upright again."""
+        pr = self.cfg['pour']
+        start, step = math.radians(pr['test_start_deg']), math.radians(pr['test_step_deg'])
+        top, dwell = math.radians(pr['test_max_deg']), float(pr['test_dwell'])
+        if not self.dry and (self.pause is None or not self.auto):
+            raise StepFailed('the pour test needs a keyboard to say "it pours" (run it in a terminal, '
+                             'without --ask)')
+        p = self.pour_place(centre, angles=(start, top))
+        over = p['over']
+        self.carry_over_bowl(over)
+        q_over = None if self.dry else self.arm_joints()
+        s = self.tip_direction(None if q_over is None else q_over[5], top, p['ways'])
+        self.turn_wrist(over, q_over, s * start, f'pour test: tip to {pr["test_start_deg"]:.0f} deg')
+        if self.dry:
+            return
+        self.log(f'\n*** POUR TEST ({self.state.get("spice") or self.spice or "?"}): tipping '
+                 f'{pr["test_step_deg"]:g} deg every {dwell:g} s. PRESS ANY KEY THE MOMENT IT POURS. '
+                 'Ctrl-C stops everything. ***\n')
+        pause = self.pause
+        mover_pause, fast = getattr(self.mover, 'pause', None), getattr(self.mover, 'speed', None)
+        self.mover.pause = None                             # a key = "it pours" now, not a pause
+        if fast is not None:
+            self.mover.speed = min(fast, float(self.cfg.get('speed_contact', fast)))
+        pause.take()                                        # a key pressed before this does not count
+        angle, poured = start, False
+        try:
+            while True:
+                end = time.monotonic() + dwell
+                while time.monotonic() < end and not poured:
+                    poured = pause.take()
+                    time.sleep(0.02)
+                if poured or angle >= top - 1e-6:
+                    break
+                angle = min(angle + step, top)
+                self.turn_wrist(over, q_over, s * angle, f'pour test {math.degrees(angle):.0f} deg', ask=False)
+                poured = pause.take()                       # pressed while it was turning
+        finally:
+            self.mover.pause = mover_pause
+            if fast is not None:
+                self.mover.speed = fast
+        q = self.arm_joints()
+        measured = abs(q[5] - q_over[5]) if q is not None and q_over is not None else angle
+        if poured:
+            self.log(f'POURING at {math.degrees(measured):.1f} deg from upright (joint_6; commanded '
+                     f'{math.degrees(angle):.0f}, so it started between {math.degrees(angle) - pr["test_step_deg"]:.0f} '
+                     f'and {math.degrees(angle):.0f} deg)')
+        else:
+            self.log(f'no key pressed up to {pr["test_max_deg"]:.0f} deg: recorded as "not poured"')
+        self.record_pour_test(measured if poured else None, angle)
+        self.turn_wrist(over, q_over, 0.0, 'jar upright again', ask=False)
+        self.still_holding('after the pour test')
+
+    def record_pour_test(self, angle, commanded):
+        """One line in real/data/pour_tests.csv (kept in git: the data for the angle -> grams table)."""
+        pr = self.cfg['pour']
+        path = POUR_TESTS_CSV
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        new = not os.path.exists(path)
+        spice = self.state.get('spice') or self.spice or ''
+        row = [time.strftime('%Y-%m-%d %H:%M:%S'), spice,
+               '' if angle is None else f'{math.degrees(angle):.1f}', f'{math.degrees(commanded):.0f}',
+               f'{pr["test_step_deg"]:g}', f'{pr["test_dwell"]:g}', f'{pr["test_start_deg"]:g}',
+               os.path.basename(self.out_dir), '']
+        with open(path, 'a') as f:
+            if new:
+                f.write('time,spice,pour_angle_deg,commanded_deg,step_deg,dwell_s,start_deg,run,notes\n')
+            f.write(','.join(row) + '\n')
+        self.state['pour_test'] = {'angle_deg': None if angle is None else math.degrees(angle),
+                                   'commanded_deg': math.degrees(commanded)}
+        self.log(f'recorded in {path}')
 
     def step6_return_to_stand(self):
         self.need('stand_seat', 'R_stand')

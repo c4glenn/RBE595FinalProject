@@ -88,6 +88,16 @@ class KeyPause:
     def requested(self):
         return self._pause.is_set()
 
+    def take(self):
+        """A key was pressed since the last call: True, and the pause is cleared (no PAUSED prompt).
+        For code that uses a key press as a signal of its own (the pour test: "it is pouring now")."""
+        if not self._pause.is_set():
+            return False
+        self._go.clear()
+        self._pause.clear()
+        self._quit = False
+        return True
+
     def hold(self):
         """If a pause was asked for: wait here until carry on (returns) or q (KeyboardInterrupt)."""
         if not self._pause.is_set():

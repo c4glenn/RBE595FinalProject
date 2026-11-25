@@ -345,6 +345,50 @@ def test_pour():
     print('pour without a bowl stops in step 1 ok')
 
 
+def test_pour_test():
+    """spice pourtest: step 5 tips from pour.test_start_deg by pour.test_step_deg until a key is
+    pressed (here: after 3 steps), records that angle in pour_tests.csv, then upright and back."""
+    import csv
+    import spice_task.steps as steps_mod
+    world = World(slot=(1, 0), bowl={})
+    io = FakeIO(world, HOME)
+    cfg = copy.deepcopy(CFG)
+    cfg['pour']['test_dwell'] = 0.0
+    task = Task(io, FakeMover(io), cfg, tempfile.mkdtemp(prefix='spice_task_'), auto=True, pour_test=True)
+
+    class Keys:                                    # "it pours" pressed while turning to the 3rd step
+        def __init__(self):
+            self.turns = 0
+
+        def take(self):
+            return self.turns == 4
+
+        def hold(self):
+            pass
+    keys = task.pause = Keys()
+    angles = []
+    turn = task.turn_wrist
+
+    def spy(o, q, angle, what, ask=True):
+        turn(o, q, angle, what, ask)
+        keys.turns += 1
+        angles.append(round(math.degrees(abs(angle)), 3))
+    task.turn_wrist = spy
+    saved, csv_path = steps_mod.POUR_TESTS_CSV, os.path.join(tempfile.mkdtemp(prefix='pour_data_'), 'pour_tests.csv')
+    steps_mod.POUR_TESTS_CSV = csv_path
+    try:
+        assert task.run(list(range(1, 9)))
+    finally:
+        steps_mod.POUR_TESTS_CSV = saved
+    start, step = cfg['pour']['test_start_deg'], cfg['pour']['test_step_deg']
+    assert angles == [start, start + step, start + 2 * step, start + 3 * step, 0.0], angles
+    rows = list(csv.DictReader(open(csv_path)))
+    assert len(rows) == 1 and float(rows[0]['pour_angle_deg']) == start + 3 * step, rows
+    assert task.state['pour_test']['angle_deg'] == start + 3 * step
+    assert world.held is None and math.dist(world.jar[:2], world.slots[2]) < 0.002
+    print(f'pour test ok: stopped at {rows[0]["pour_angle_deg"]} deg, recorded, jar back in its slot')
+
+
 def test_stale_reference_picture():
     """The "with jar" picture is from another time (label turned by a regrasp, other light): the
     lid seen in the pocket still says the jar is back in the stand."""

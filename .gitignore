@@ -58,3 +58,4 @@ log/
 underlay_ws/src/*
 !underlay_ws/src/ros2_kortex
 real/captures/
+real/models/

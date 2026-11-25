@@ -8,6 +8,8 @@
 #   real/spice.sh dry              perception + every planned pose, no motion
 #   real/spice.sh level1           pick the salt jar out of the rack and put it back (steps 1,2,8)
 #   real/spice.sh full             the whole task, steps 1-8 (--steps 1-4,6-8 skips the shake)
+#   real/spice.sh pourtest         the whole task, but step 5 tips slowly: press a key when it pours (angle ->
+#                                  real/data/pour_tests.csv). After a failure: spice resume 5,6,7,8 --pour-test
 #   real/spice.sh resume 4,6,7,8   carry on from the last run's saved state
 #   real/spice.sh home             get the arm home safely from where a run stopped (back out, up, home)
 #   real/spice.sh jog              move the arm by hand from the terminal (joints, x/y/z, save poses)
@@ -15,7 +17,8 @@
 #
 # Shortcut for this terminal only (nothing written to ~/.bashrc):  source real/activate.sh
 # then just: spice vision, spice level1, ...
-# Extra arguments go to the task, e.g.  real/spice.sh full --index 1 --home
+# Extra arguments go to the task, e.g.  real/spice.sh full --spice pepper --home
+# Which jar: the one whose paper label reads --spice (default salt); --index N = lid N instead.
 #
 # Robot/camera already running in another terminal? Add NO_BRINGUP=1 in front (spice refuses to
 # start a second driver: two drivers on one arm leave it not moving at all).
@@ -49,6 +52,11 @@ source_ros() {
   fi
   # shellcheck disable=SC1091
   source /opt/ros/jazzy/setup.bash
+  # Cyclone on loopback: over Wi-Fi / USB Ethernet the big camera images never arrive (config/cyclonedds.xml)
+  export CYCLONEDDS_URI="${CYCLONEDDS_URI:-file://$HERE/config/cyclonedds.xml}"
+  # The ros2 CLI daemon keeps the DDS settings it was started with: one left over from a terminal
+  # without the line above sees none of our nodes, so `ros2 topic list` waits forever. Fresh one.
+  ros2 daemon stop >/dev/null 2>&1 || true
   if KWS="$(find_kortex)"; then
     # shellcheck disable=SC1090
     source "$KWS/setup.bash"
@@ -103,6 +111,38 @@ wait_for() {   # wait_for <what> <seconds> <command...>
   green "$what: up"
 }
 
+# The camera is up when a colour image actually arrives (the topic names exist before the driver
+# has streamed anything). realsense2_camera_node sometimes segfaults right after opening the
+# streams ("process has died ... exit code -11" in camera.log): then it is started again.
+start_camera() {   # start_camera <profile>
+  local profile=$1 try pid end
+  : >"$LOG_DIR/camera.log"
+  for try in 1 2 3; do
+    say "starting the camera (log: $LOG_DIR/camera.log)$([ "$try" -gt 1 ] && echo ", try $try of 3")"
+    echo "===== spice.sh: camera start, try $try =====" >>"$LOG_DIR/camera.log"
+    setsid ros2 launch "$HERE/launch/bringup_camera.launch.py" profile:="$profile" >>"$LOG_DIR/camera.log" 2>&1 &
+    pid=$!
+    PIDS+=("$pid")
+    end=$((SECONDS + 45))
+    while [ $SECONDS -lt $end ]; do
+      if timeout 5 ros2 topic echo --once --field header.frame_id /camera/camera/color/image_raw >/dev/null 2>&1; then
+        green "camera: up (colour images arriving)"
+        return 0
+      fi
+      if ! kill -0 "$pid" 2>/dev/null || tail -n 5 "$LOG_DIR/camera.log" | grep -q 'process has died'; then
+        red "the camera driver crashed while starting (see camera.log); starting it again"
+        break
+      fi
+      sleep 1
+    done
+    kill -INT -- "-$pid" 2>/dev/null; sleep 2; kill -KILL -- "-$pid" 2>/dev/null
+    local keep=() p; for p in "${PIDS[@]}"; do [ "$p" != "$pid" ] && keep+=("$p"); done; PIDS=("${keep[@]}")
+  done
+  red "no colour image from the camera after 3 tries; see $LOG_DIR/camera.log"
+  red "  (unplug/replug the D405 straight into the laptop, not through the dock)"
+  return 1
+}
+
 robot_running() { pgrep -f '^[^ ]*/lib/controller_manager/ros2_control_node' >/dev/null; }
 
 start_bringup() {
@@ -135,12 +175,7 @@ start_bringup() {
   fi
   setsid ros2 launch "$HERE/launch/bringup_robot.launch.py" rviz:="${RVIZ:-true}" "${fake[@]}" >"$LOG_DIR/robot.log" 2>&1 &
   PIDS+=($!)
-  if [ "${NO_CAMERA:-0}" != 1 ]; then
-    say "starting the camera (log: $LOG_DIR/camera.log)"
-    setsid ros2 launch "$HERE/launch/bringup_camera.launch.py" profile:="$profile" >"$LOG_DIR/camera.log" 2>&1 &
-    PIDS+=($!)
-    wait_for "camera" 60 bash -c "ros2 topic list | grep -q /camera/camera/aligned_depth_to_color/image_raw" || exit 1
-  fi
+  if [ "${NO_CAMERA:-0}" != 1 ]; then start_camera "$profile" || exit 1; fi
   wait_for "MoveIt" 120 bash -c "ros2 action list | grep -q '^/move_action$'" || exit 1
   wait_for "robot driver" 60 bash -c "ros2 action list | grep -q gripper_cmd" || exit 1
   say "waiting for the arm to finish going home ..."
@@ -155,7 +190,15 @@ check_camera_usb() {
     red "  Keeps dropping out? The wrist cable is strained/loose: secure it so the arm cannot tug it."
     exit 1
   fi
-  if lsusb -t 2>/dev/null | grep -i uvcvideo | grep -q '480M' && [ -z "${CAMERA_PROFILE:-}" ]; then
+  # Link speed of the D405 itself (Mbit/s), not of every uvcvideo device: the laptop's
+  # built-in webcam is always 480M and must not trip this check.
+  local d405_speed=""
+  for d in /sys/bus/usb/devices/*; do
+    if [ "$(cat "$d/idVendor" 2>/dev/null)" = 8086 ] && [ "$(cat "$d/idProduct" 2>/dev/null)" = 0b5b ]; then
+      d405_speed=$(cat "$d/speed" 2>/dev/null); break
+    fi
+  done
+  if [ -n "$d405_speed" ] && [ "${d405_speed%%.*}" -lt 5000 ] && [ -z "${CAMERA_PROFILE:-}" ]; then
     red "The D405 is on a USB 2 link (480M). On this PC its frames then arrive cut off (even at"
     red "640x480, 5 fps), so the code never gets a picture. It needs USB 3 (5000M):"
     red "  * a USB 3 cable: 'SS' logo / blue tongue in the USB-A end (many USB-C cables are USB 2 only);"
@@ -175,6 +218,7 @@ case "$cmd" in
   dry)     source_ros; start_bringup; task --dry-run "$@" ;;
   level1)  source_ros; start_bringup; task --steps 1,2,8 "$@" ;;
   full)    source_ros; start_bringup; task "$@" ;;
+  pourtest) source_ros; start_bringup; task --steps 1-8 --pour-test "$@" ;;
   resume)  source_ros; start_bringup; steps="${1:?give the steps, e.g. real/spice.sh resume 4,6,7,8}"; shift
            task --steps "$steps" --resume "$@" ;;
   home)    source_ros; start_bringup; task --go-home --resume "$@" ;;

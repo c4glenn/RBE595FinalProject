@@ -79,7 +79,12 @@ def main():
     p.add_argument('--steps', default=DEFAULT_STEPS, help=f'steps to run, e.g. 1,2,8 or 1-4 (default {DEFAULT_STEPS})')
     p.add_argument('--resume', nargs='?', const='latest', default=None,
                    help='start from a saved state.json (default: the newest run in real/captures)')
-    p.add_argument('--index', type=int, help='several lids seen: pick this one (numbers in the survey picture)')
+    p.add_argument('--spice', help='fetch the jar whose paper label reads this (default: labels.spice in '
+                   'the config, salt)')
+    p.add_argument('--index', type=int, help='ID mode: pick lid N (numbers in the survey picture) instead of '
+                   'by its label')
+    p.add_argument('--pour-test', action='store_true', help='step 5: instead of tip + shake, tip slowly until a '
+                   'key is pressed when it pours; the angle goes to real/data/pour_tests.csv (spice pourtest)')
     p.add_argument('--ask', action='store_true', help='ask [y/N] before every motion (default: no questions; '
                    'any key pauses the arm, Enter carries on, q stops)')
     p.add_argument('--auto', action='store_true', help=argparse.SUPPRESS)          # the default now
@@ -104,7 +109,7 @@ def main():
     joints = JointWatcher(io)
     auto = not args.ask
     task = Task(io, mover, cfg, out_dir, auto=auto, dry_run=args.dry_run, show=args.show, index=args.index,
-                config_path=args.config)
+                config_path=args.config, spice=args.spice, pour_test=args.pour_test)
     pause = None
     if auto and not args.dry_run:
         pause = KeyPause(log=lambda m: print(m, flush=True))

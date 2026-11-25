@@ -176,6 +176,12 @@ pour:
   cycles: 3
   camera_clear: 0.02        # tipped past 90 deg the wrist camera swings below the hand: the hand goes
                             # higher if needed so the camera box stays this far above the rim
+  # Pour test (spice pourtest): instead of tip + shake, step 5 tips the jar slowly until you press a
+  # key when it starts pouring; the angle is appended to real/data/pour_tests.csv.
+  test_start_deg: 60        # turned to this at once (nothing comes out before it)
+  test_step_deg: 2          # then this much at a time (the angle is known to within one step)
+  test_dwell: 1.5           # s still after every step: the spice needs a moment to start flowing
+  test_max_deg: 145         # give up here (joint_6 turns +-149 deg)
 
 # ---- the bowl (spice_task/bowl.py): no tag, found anywhere by Hough + depth in step 1 ---------------
 bowl:
@@ -223,6 +229,20 @@ lid_detection:
   # Lids are measured with the camera straight above them, this high (camera optical centre to
   # lid top). The D405 sees well from ~7 cm; at 0.18 m the 87 x 58 deg view is ~0.34 x 0.20 m.
   look_height: 0.18
+
+# Which jar is which: the paper label on (or next to) its lid, read with OCR (helpers/spice_ocr.py,
+# CRNN model in real/models/, downloaded on first use) in the survey picture. The task picks the lid
+# whose label reads `spice` (spice ... --spice pepper for another); --index N picks lid N instead
+# (the old way, labels only shown). One lid in view and its label not read: that lid, with a warning.
+labels:
+  spice: salt               # what to fetch (--spice overrides)
+  spices: [salt, pepper, paprika, cumin, oregano, garlic, sugar, cinnamon, basil, thyme, chili,
+           turmeric, ginger, nutmeg, parsley, rosemary]   # the names a label can read (a-z, 0-9)
+  min_score: -2.0           # a reading counts if its per-letter CTC log-likelihood is at least this
+  min_margin: 1.0           # ... and it beats the next-best name by this
+  max_dist: 0.05            # a label belongs to a lid if it is within this of the lid's centre (on the lid plane)
+  captions: false           # pictures: "lid N <spice> / z" under each lid (spice vision --captions turns them on);
+                            # off, the lid numbers and names are in the text at the top / the log
 
 checks:
   aim_tolerance: 0.0015     # look-move-look until the correction is below this
