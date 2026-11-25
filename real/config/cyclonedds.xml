@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- CycloneDDS for the spice task (spice.sh / activate.sh set CYCLONEDDS_URI to this when it is unset).
+     All our nodes run on this PC (ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST), but by default Cyclone
+     sends over a real interface (Wi-Fi / the robot's USB Ethernet, MTU 1500): a 1280x720 colour
+     image (2.7 MB) is then cut into ~1900 IP fragments and nearly every frame loses one, so
+     /camera/camera/color/image_raw arrives at 0 Hz while the small camera_info gets through at 15 Hz
+     ("Not ready: no colour image" / "no camera frames"). On loopback (MTU 64k) everything is 15 Hz. -->
+<CycloneDDS xmlns="https://cdds.io/config">
+  <Domain Id="any">
+    <General>
+      <Interfaces><NetworkInterface name="lo"/></Interfaces>
+    </General>
+    <Internal>
+      <SocketReceiveBufferSize min="4MB"/>
+    </Internal>
+  </Domain>
+</CycloneDDS>

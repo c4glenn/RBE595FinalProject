@@ -389,6 +389,50 @@ def test_pour_test():
     print(f'pour test ok: stopped at {rows[0]["pour_angle_deg"]} deg, recorded, jar back in its slot')
 
 
+def test_holes_down():
+    """Step 4 with the shaker holes known (find_holes faked: the sim jar has no label): the side
+    grasp lines the finger axis up with them and step 5 tips the way that puts them at the bottom."""
+    for hole_deg in (0, 90, 200):
+        world = World(slot=(1, 0), bowl={})
+        io = FakeIO(world, HOME)
+        task = Task(io, FakeMover(io), CFG, tempfile.mkdtemp(prefix='spice_task_'), auto=True)
+        h = np.array([math.cos(math.radians(hole_deg)), math.sin(math.radians(hole_deg))])
+        task.find_holes = lambda top, h=h: h
+        tips = []
+        turn = task.turn_wrist
+
+        def spy(o, q, angle, what, ask=True, turn=turn, tips=tips):
+            turn(o, q, angle, what, ask)
+            tips.append(angle)
+        task.turn_wrist = spy
+        assert task.run(list(range(1, 9))), hole_deg
+        R = tp.side_R(task.state['side_choice']['heading'], task.camera())
+        align, way = tp.holes_tip(R, h)
+        assert align >= CFG['labels']['holes_min_align'] and task.state['pour_way'] == way, (hole_deg, align)
+        assert all(np.sign(a) == way for a in tips if abs(a) > 1e-6), (hole_deg, way, tips)
+        print(f'holes at {hole_deg} deg: grasp {math.degrees(math.acos(min(1, align))):.0f} deg off, tipped {way:+d}')
+
+
+def test_scan():
+    """--scan (the recipe window): survey pose, every lid on the rack listed with its label (the
+    sim's jar has none), one SCAN_RESULT line, and the arm does not go further."""
+    import contextlib
+    import io as io_mod
+    import json
+    world = World(slot=(1, 0))
+    io = FakeIO(world, HOME)
+    task = Task(io, FakeMover(io), CFG, tempfile.mkdtemp(prefix='spice_task_'), auto=True)
+    out = io_mod.StringIO()
+    with contextlib.redirect_stdout(out):
+        found = task.scan()
+    line = [l for l in out.getvalue().splitlines() if l.startswith('SCAN_RESULT ')]
+    assert len(line) == 1 and json.loads(line[0][12:])['lids'] == found
+    assert len(found) == 1 and found[0]['label'] is None
+    assert math.dist(found[0]['centre'][:2], world.slots[2]) < 0.005, found
+    assert world.held is None
+    print(f'scan ok: {found}')
+
+
 def test_stale_reference_picture():
     """The "with jar" picture is from another time (label turned by a regrasp, other light): the
     lid seen in the pocket still says the jar is back in the stand."""

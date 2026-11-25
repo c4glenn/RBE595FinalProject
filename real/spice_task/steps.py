@@ -44,7 +44,8 @@ from spice_task.bowl import detect_bowl
 from spice_task import task_poses as tp
 from spice_task.config_file import set_line
 from spice_task import labels as spice_labels
-from spice_task.lid_detector import LidDetector, draw_circle
+from spice_task.holes import lid_holes
+from spice_task.lid_detector import LidDetector, draw_circle, project
 from spice_task.tags import draw_tags, measure_tags
 
 ARM_JOINTS = [f'joint_{i}' for i in range(1, 7)]
@@ -610,7 +611,9 @@ class Task:
             bowl = (c[0], c[1], st['bowl']['radius'], h, c[2])
         self.mover.set_scene(self.cfg, st.get('table_z'), rack=st.get('rack'), stand=stand, bowl=bowl)
 
-    def step1_find_jar(self):
+    def survey(self):
+        """Survey pose: the rack and stand tags (and the camera mount), then every lid on the rack
+        with its label read. -> (tags, rack or None, LidResult). Step 1 and the scan (--scan)."""
         cfg = self.cfg
         self.gripper(cfg['gripper']['open'], 'open the gripper')
         self.free(self.survey_pose(), 'survey pose')
@@ -647,6 +650,23 @@ class Task:
         region = tp.rack_region(rack, cfg) if rack is not None else None
         # index mode (--index N) only shows the labels; label mode picks the lid by them
         result = self.look_lids(top_z, label='survey_lids', region=region, read_labels=True)
+        return tags, rack, result
+
+    def scan(self):
+        """--scan (the recipe window): which spices are on the rack. Prints one line
+        SCAN_RESULT {"lids": [{"index": k, "label": name or null, "centre": [x, y, z]}, ...]}."""
+        _, _, result = self.survey()
+        found = [{'index': k, 'label': lid.label, 'centre': [round(float(v), 4) for v in lid.center]}
+                 for k, lid in enumerate(result.lids)]
+        self.state['scan'] = found
+        names = [f['label'] or '?' for f in found]
+        self.log(f'scan: {len(found)} jar(s) on the rack: ' + (', '.join(names) or 'none'))
+        print('SCAN_RESULT ' + json.dumps({'lids': found}), flush=True)
+        return found
+
+    def step1_find_jar(self):
+        cfg = self.cfg
+        tags, rack, result = self.survey()
         if not result.lids:
             raise StepFailed(f'no jar lid found from the survey pose: {result.reason}')
         try:
@@ -980,11 +1000,13 @@ class Task:
         self.state['stand_lid_top'] = seated.tolist()       # from tag 8 and the stand's shape
         self.viz_jar(seated)
 
-    def side(self, lid_top, R_top):
+    def side(self, lid_top, R_top, holes=None):
         """Side-grasp poses (task_poses.side_poses) from a direction the arm can reach. Straight
         from the base needs the hand turned side-on close to the base, which the Gen3 lite often
         cannot do; so other headings and a shorter stand-off are tried (MoveIt IK, no motion).
-        The choice is kept in the state, so step 6 uses the same one."""
+        The choice is kept in the state, so step 6 uses the same one.
+        holes (unit xy, from find_holes): approach at right angles to them first (the finger axis
+        along the holes, so tipping puts them at the bottom), and the tip way goes in the state."""
         cfg = self.cfg
         keep = self.state.get('side_choice')
         if keep:
@@ -994,20 +1016,112 @@ class Task:
         if clears[0] > 0.06:
             clears.append(0.06)
         tried = []
+        dhs = list(tp.SIDE_HEADINGS_DEG)
+        min_align = float((cfg.get('labels') or {}).get('holes_min_align', 0.7))
+        if holes is not None:
+            # right angles to the holes (either way round), then +-15 / 30 deg off that; then the
+            # usual ones. Each sorted by how well the holes end up at the bottom, then by the turn.
+            hole = math.degrees(math.atan2(holes[1], holes[0]) - base)
+            extra = [hole + side_ + off for side_ in (90, -90) for off in (0, 15, -15, 30, -30)]
+            extra = [(d + 180) % 360 - 180 for d in extra]
+            extra = [round(d) for d in extra if abs(d) <= 120]
+            align = lambda d: tp.holes_tip(tp.side_R(base + math.radians(d), self.camera()), holes)[0]  # noqa: E731
+            dhs = sorted(dict.fromkeys(extra + dhs), key=lambda d: (-round(align(d), 2), abs(d)))
+            good = [d for d in dhs if align(d) >= min_align]
+            dhs = good + [d for d in dhs if d not in good]
         for clear in clears:
-            for dh in tp.SIDE_HEADINGS_DEG:
+            for dh in dhs:
                 heading = base + math.radians(dh)
                 side = tp.side_poses(lid_top, cfg, R_top, self.camera(), heading, clear)
                 keys = ('retreat_high_top', 'retreat_high', 'approach', 'grasp', 'lift')
                 if self.dry or all(self.mover.reachable(side[key]) for key in keys):
                     if dh or clear != clears[0]:
                         self.log(f'side grasp: from {dh:+d} deg off straight-from-the-base, stand-off '
-                                 f'{100 * clear:.0f} cm (the straight one is out of reach)')
+                                 f'{100 * clear:.0f} cm' + ('' if holes is not None else
+                                                           ' (the straight one is out of reach)'))
                     self.state['side_choice'] = {'heading': heading, 'clear': clear}
+                    if holes is not None:
+                        a, way = tp.holes_tip(side['R'], holes)
+                        self.state['pour_way'] = way
+                        self.state['holes_align'] = a
+                        msg = (f'holes: finger axis {math.degrees(math.acos(min(1.0, a))):.0f} deg off them; '
+                               f'tipped {"+" if way > 0 else "-"}, they are at the bottom of the lid')
+                        self.log(msg if a >= min_align else
+                                 f'WARNING: no reachable side grasp lines the fingers up with the holes; {msg} '
+                                 'only partly (move the stand, or turn the jar in it)')
                     return side
                 tried.append(f'{dh:+d} deg / {100 * clear:.0f} cm')
         raise StepFailed('no side grasp around the jar in the stand that the arm can reach (tried '
                          + ', '.join(tried) + '): move the stand a little further from the arm base')
+
+    def find_holes(self, top):
+        """The shaker holes of the jar standing in the stand (the camera right above it), two ways:
+          text: its label read, holes on the "below the text" side (labels.holes_direction);
+          dots: the holes themselves, dark round dots on the lid seen top-down (holes.lid_holes).
+        labels.holes picks which one the grasp uses: below_text, dots (text if no dots found),
+        compare (text; dots only logged next to it, to see if they agree), off. -> unit xy or None."""
+        lc = self.cfg.get('labels') or {}
+        mode = lc.get('holes', 'dots')
+        if mode == 'off' or self.dry:
+            return None
+        snap = self.io.snapshot(1)
+        if snap is None:
+            self.log('holes: no camera picture; side grasp as before')
+            return None
+        image, _, T_base_cam = snap
+        K, D = self.io.K, self.io.D
+        best = None
+        for label in spice_labels.get_reader(lc).read(image):
+            if label.name is None:
+                continue
+            p = spice_labels.pixel_on_plane(label.center, top[2], T_base_cam, K, D)
+            if p is None or math.dist(p[:2], top[:2]) > lc.get('max_dist', 0.05):
+                continue
+            if best is None or label.score > best.score:
+                best = label
+        text, check = (None, None) if best is None else spice_labels.holes_direction(best, top, T_base_cam, K, D)
+        dots = None
+        if mode in ('dots', 'compare'):
+            holes, top_pic = lid_holes(image, top, self.cfg['jar']['lid_diameter'] / 2, T_base_cam, K, D,
+                                       None if best is None else best.quad)
+            self.save_picture('stand_holes_dots', top_pic)
+            if holes is not None:
+                dots = holes.direction
+        deg = lambda v: math.degrees(math.atan2(v[1], v[0]))  # noqa: E731
+        lines = []
+        if text is not None:
+            lines.append(f'text: label "{best.name}", holes below the text, towards {deg(text):+.0f} deg' +
+                         ('' if check is None else f' ({check:.0f} deg from "across the lid from the label"' +
+                          (': check the picture' if check > 45 else '') + ')'))
+        else:
+            lines.append('text: ' + ('no label read on the jar' if best is None else 'label not on the lid plane'))
+        if mode in ('dots', 'compare'):
+            lines.append(f'dots: {len(holes.dots)} holes found, towards {deg(dots):+.0f} deg'
+                         if dots is not None else 'dots: holes not found')
+        if text is not None and dots is not None:
+            diff = abs((deg(text) - deg(dots) + 180) % 360 - 180)
+            lines.append(f'text and dots differ by {diff:.0f} deg' + (' -- they DISAGREE' if diff > 45 else ''))
+            self.state['holes_diff_deg'] = diff
+        use = {'below_text': text, 'compare': text, 'dots': dots if dots is not None else text}[mode]
+        source = ('text' if use is text else 'dots') if use is not None else None
+        self.state.update(holes_text=None if text is None else text.tolist(),
+                          holes_dots=None if dots is None else dots.tolist(), holes_source=source)
+        picture = image.copy()
+        if best is not None:
+            spice_labels.draw_labels(picture, [(best, True)], [])
+        c = project(top, T_base_cam, K, D)[0]
+        for v, colour, name in ((text, MAGENTA, 'text'), (dots, GREEN, 'dots')):
+            if v is not None:
+                tip = project(np.asarray(top) + [0.025 * v[0], 0.025 * v[1], 0.0], T_base_cam, K, D)[0]
+                cv2.arrowedLine(picture, tuple(int(x) for x in c), tuple(int(x) for x in tip), colour, 3, tipLength=0.3)
+                cv2.putText(picture, name, tuple(int(x) for x in tip), cv2.FONT_HERSHEY_SIMPLEX, 0.6, colour, 2)
+        self.save_picture('stand_holes', picture)
+        self.log('holes (' + mode + '): ' + '; '.join(lines) +
+                 (f'. Grasp uses the {source} direction.' if use is not None else
+                  '. WARNING: hole direction unknown: side grasp as before, the holes may not point down.'))
+        if use is not None:
+            self.state['holes_dir'] = use.tolist()
+        return use
 
     def step4_regrasp_side(self):
         self.need('stand_lid_top', 'R_stand')
@@ -1016,7 +1130,9 @@ class Task:
         # look again: the stand / the jar may have moved since it was put there
         seat = self.track_stand(np.array(self.state['stand_seat']), R_top, 'before the side grasp')
         top = self.jar_in_stand(seat, R_top, 'before the side grasp')
-        side = self.side(top, R_top)
+        self.state.pop('pour_way', None)
+        holes = self.find_holes(top)                # camera is right above the lid now
+        side = self.side(top, R_top, holes)
         # Slide back still top-down, turn side-on there (clear of the jar), come down beside it.
         self.line(side['retreat_high_top'], 'slide back from the jar (top-down)')
         self.free(side['retreat_high'], 'turn side-on')
@@ -1029,10 +1145,11 @@ class Task:
         self.state['held'] = 'side'
 
     # ------------------------------------------------------------------ pouring
-    def pour_place(self, centre, angles=None):
+    def pour_place(self, centre, angles=None, way=None):
         """Pour poses (task_poses.pour_poses) from a direction the arm can reach upright and tipped
         either way (MoveIt IK, no motion): straight from the base first, then others.
-        angles: the tilts (rad) it must reach; default the tilt and both ends of the shake."""
+        angles: the tilts (rad) it must reach; default the tilt and both ends of the shake.
+        way: +1 / -1, the only tip direction allowed (the one that puts the shaker holes down)."""
         cfg = self.cfg
         tilt, amp = math.radians(cfg['pour']['tilt_deg']), math.radians(cfg['pour']['shake_deg'])
         if angles is None:
@@ -1041,12 +1158,12 @@ class Task:
         for dh in tp.POUR_HEADINGS_DEG:
             p = tp.pour_poses(centre, cfg, self.camera(), base + math.radians(dh))
             if self.dry:
-                p['ways'] = [1, -1]
+                p['ways'] = [1, -1] if way is None else [way]
                 return p
             if not self.mover.reachable(p['over']):
                 continue
             # which way(s) it can be tipped (tilt and both ends of the shake) without hitting anything
-            p['ways'] = [s for s in (1, -1)
+            p['ways'] = [s for s in ((1, -1) if way is None else (way,))
                          if all(self.mover.reachable(tp.turned(p['over'], s * a)) for a in angles)]
             if p['ways']:
                 if p['raised'] > 0.001:
@@ -1056,8 +1173,9 @@ class Task:
                 if dh:
                     self.log(f'pour: hand from {dh:+d} deg off straight-from-the-base (that one is out of reach)')
                 return p
-        raise StepFailed('no hand pose over the bowl that the arm can reach upright and tipped: move the bowl '
-                         'closer to the arm (or lower pour.above_rim)')
+        raise StepFailed('no hand pose over the bowl that the arm can reach upright and tipped' +
+                         ('' if way is None else ' the way that puts the shaker holes down') +
+                         ': move the bowl closer to the arm (or lower pour.above_rim)')
 
     def tip_direction(self, q6, turn, ways=(1, -1)):
         """+1 / -1: a way (of `ways`: the ones IK found collision-free) joint_6 can turn `turn` rad
@@ -1105,7 +1223,7 @@ class Task:
         self.log(f'bowl rim centre {fmt(centre)}, diameter {2000 * self.state["bowl"]["radius"]:.0f} mm')
         if self.pour_test:
             return self.pour_test_over_bowl(centre)
-        p = self.pour_place(centre)
+        p = self.pour_place(centre, way=self.state.get('pour_way'))
         over = p['over']
         tilt, amp = math.radians(pr['tilt_deg']), math.radians(pr['shake_deg'])
         # up first (out of the stand, above the rim height), then across, still upright
@@ -1145,7 +1263,7 @@ class Task:
         if not self.dry and (self.pause is None or not self.auto):
             raise StepFailed('the pour test needs a keyboard to say "it pours" (run it in a terminal, '
                              'without --ask)')
-        p = self.pour_place(centre, angles=(start, top))
+        p = self.pour_place(centre, angles=(start, top), way=self.state.get('pour_way'))
         over = p['over']
         self.carry_over_bowl(over)
         q_over = None if self.dry else self.arm_joints()
@@ -1190,6 +1308,13 @@ class Task:
         self.turn_wrist(over, q_over, 0.0, 'jar upright again', ask=False)
         self.still_holding('after the pour test')
 
+    def holes_note(self):
+        """For pour_tests.csv: were the shaker holes lined up at the bottom when it tipped?"""
+        a = self.state.get('holes_align')
+        if self.state.get('pour_way') is None or a is None:
+            return 'holes not known'
+        return f'holes down ({math.degrees(math.acos(min(1.0, a))):.0f} deg off)'
+
     def record_pour_test(self, angle, commanded):
         """One line in real/data/pour_tests.csv (kept in git: the data for the angle -> grams table)."""
         pr = self.cfg['pour']
@@ -1200,7 +1325,7 @@ class Task:
         row = [time.strftime('%Y-%m-%d %H:%M:%S'), spice,
                '' if angle is None else f'{math.degrees(angle):.1f}', f'{math.degrees(commanded):.0f}',
                f'{pr["test_step_deg"]:g}', f'{pr["test_dwell"]:g}', f'{pr["test_start_deg"]:g}',
-               os.path.basename(self.out_dir), '']
+               os.path.basename(self.out_dir), self.holes_note()]
         with open(path, 'a') as f:
             if new:
                 f.write('time,spice,pour_angle_deg,commanded_deg,step_deg,dwell_s,start_deg,run,notes\n')

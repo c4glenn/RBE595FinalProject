@@ -241,6 +241,14 @@ labels:
   min_score: -2.0           # a reading counts if its per-letter CTC log-likelihood is at least this
   min_margin: 1.0           # ... and it beats the next-best name by this
   max_dist: 0.05            # a label belongs to a lid if it is within this of the lid's centre (on the lid plane)
+  # Shaker holes: step 4 finds them on the jar in the stand and side-grasps so that, tipped in
+  # step 5, they are at the bottom of the lid. Two ways to find them:
+  #   text: on our jars the holes are on the side of the lid "below" the label's text;
+  #   dots: the holes themselves (spice_task/holes.py: dark round dots on the lid, seen top-down).
+  # dots: use the dots (the text if none found) | below_text: use the text only | compare: use the
+  # text, log the dots next to it ("text and dots differ by N deg") | off: grasp as before.
+  holes: dots
+  holes_min_align: 0.7      # |cos| of the holes vs the finger axis to accept (1 = holes straight down when tipped)
   captions: false           # pictures: "lid N <spice> / z" under each lid (spice vision --captions turns them on);
                             # off, the lid numbers and names are in the text at the top / the log
 

@@ -31,7 +31,7 @@ from helpers.joint_bounds import JointWatcher, unwind          # noqa: E402
 from helpers.key_pause import KeyPause                         # noqa: E402
 from helpers.robot_motion import ArmMover                      # noqa: E402
 from spice_task.io_node import TaskIO, spin_in_background      # noqa: E402
-from spice_task.steps import Task                              # noqa: E402
+from spice_task.steps import StepFailed, Task                  # noqa: E402
 
 DEFAULT_STEPS = '1-8'
 CAPTURES = os.path.join(HERE, 'captures')
@@ -83,6 +83,8 @@ def main():
                    'the config, salt)')
     p.add_argument('--index', type=int, help='ID mode: pick lid N (numbers in the survey picture) instead of '
                    'by its label')
+    p.add_argument('--scan', action='store_true', help='no steps: go to the survey pose and list the jars on '
+                   'the rack with their labels (a SCAN_RESULT {json} line; the recipe window uses it)')
     p.add_argument('--pour-test', action='store_true', help='step 5: instead of tip + shake, tip slowly until a '
                    'key is pressed when it pours; the angle goes to real/data/pour_tests.csv (spice pourtest)')
     p.add_argument('--ask', action='store_true', help='ask [y/N] before every motion (default: no questions; '
@@ -139,6 +141,13 @@ def main():
             raise SystemExit('A joint is outside MoveIt\'s limits, so MoveIt cannot plan any move (see above).')
         if args.go_home:
             ok = task.go_home_safely()
+        elif args.scan:
+            try:
+                task.update_scene()
+                task.scan()
+                ok = True
+            except StepFailed as e:
+                print(f'\nFAILED scan: {e}')
         else:
             print(f'Steps {steps}; pictures and state in {out_dir}' + (' [DRY RUN: no motion]' if args.dry_run else ''))
             ok = task.run(steps)

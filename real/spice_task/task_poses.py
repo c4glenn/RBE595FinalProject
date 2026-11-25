@@ -80,6 +80,21 @@ def side_R(heading, camera=None):
     return np.column_stack((x, np.cross(a, x), a))
 
 
+def holes_tip(R_grasp, holes_xy):
+    """For a side grasp with orientation R_grasp (side_R) of a jar whose shaker holes point along
+    holes_xy (base_link, horizontal, from the lid centre): -> (align, way).
+    Tipping turns the hand about its approach axis, and the lid's lowest edge is then along the
+    finger axis (end_effector_link y) on the side it tips towards: tipped by way * angle (turned()),
+    the edge at way * x_z * y goes down. align = |cos| between the holes and the finger axis
+    (1: holes straight down when tipped, 0: holes on the palm / far side, they stay level);
+    way = +1 / -1: the tip direction that puts them down."""
+    h = np.array([holes_xy[0], holes_xy[1], 0.0])
+    h /= np.linalg.norm(h)
+    v_y = float(R_grasp[:, 1] @ h)
+    x_z = float(R_grasp[2, 0])                          # +1 camera side up, -1 "inside" mount down
+    return abs(v_y), (1 if v_y * x_z >= 0 else -1)
+
+
 def turned(pose, angle):
     """The same hand position turned `angle` (rad) about its own approach axis (end_effector_link
     z, which is joint_6's axis): on a side grasp this tips the held jar over sideways."""

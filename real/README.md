@@ -103,6 +103,7 @@ Logs: `real/captures/logs/`. Go one level at a time.
 | `spice dry` | no motion: what it sees + every pose it would go to |
 | `spice level1` | level 1: pick the jar out of the rack, put it back (steps 1, 2, 8) |
 | `spice full` | the whole task, steps 1-8 with the shake over the bowl (`spice full --steps 1-4,6-8`: without it) |
+| `spice recipe` | looks at the rack, lists the spices there; pick them in order, Start runs the whole task for each (see *Recipe window*) |
 | `spice pourtest` | the whole task, but step 5 tips slowly until you press a key when it pours; the angle goes to `real/data/pour_tests.csv` (see *Pour test*) |
 | `spice resume 4,6,7,8` | carry on from the last run's saved state after fixing a failure |
 | `spice home` | get the arm home safely from where a run stopped: open (if empty), back out along the approach (holding the jar: straight up), up to z 0.25, then a planned move home. A failed step, `q` after a pause or Ctrl-C asks the same (`[y/N]`), and the robot bringup does it too before its own home move |
@@ -165,6 +166,28 @@ read is not drawn) and the target lid (green circle); the top text says `lids: 0
 in the task's pictures). `--spice NAME`, `--index N` and `--no-labels` work there too. The names a label can read are `labels.spices`; add a new spice there (a-z, 0-9 only).
 Tests: `python3 -m pytest real/test/test_labels.py real/test/test_spice_ocr.py`.
 
+## Recipe window
+
+```bash
+spice recipe
+```
+
+Starts the robot and camera, then opens a window. First the arm looks at the rack (survey pose,
+`run_task.py --scan`: every lid's label read) and the left list shows only the spices that are
+there (a label it could not read shows as a grey `?`: turn it to face up and **Rescan rack**). Pick
+spices from that list (double-click or **Add**) into the recipe, order them with **Up / Down**, choose what each run does (shake, pour
+test, or no pouring), and **Start**. Each spice is one whole run of the task (steps 1-8 with
+`--spice NAME`), one after the other; the list shows `[running]`, `[done]`, `[FAILED]`.
+
+Runs are fully automatic: a run that goes well asks nothing. The only questions come after a
+failure ("the jar is in the hand: let go of it here before going home?", and "bring the arm home?"
+when "go home" is off); the window answers them **No** (carry the jar home, never drop it where the
+arm stopped). Tick "debug: answer the robot's questions myself" to get **Yes / No** buttons for
+them instead. **Pause** stops the arm where it is, **Continue** carries on, **Stop** ends the run
+(twice: like Ctrl-C). A failed spice stops the recipe; **Start** again carries on
+from it. "go home after each spice" (on by default) passes `--home`; "dry run" checks a recipe with
+no motion. Amounts are not in yet (no grams): one pour per spice.
+
 ## Pour test: at what tilt does a spice start pouring?
 
 First step towards a per-spice "tilt -> grams" table (e.g. salt 5 deg -> 1 g, parsley 15 deg -> 1 g):
@@ -184,6 +207,25 @@ with steps 6-8. No key up to `pour.test_max_deg` (145): recorded with an empty a
 The angle is good to one step (it started between the last two commanded angles; the log says
 which). Ctrl-C stops everything as usual. Keys only mean "it pours" during the tilting; before and
 after it they pause the arm as usual.
+
+## Shaker holes: where they are, so tipping pours
+
+Tipping (step 5) rolls the jar about the gripper's approach axis, so the lid's lowest edge is
+towards a finger. Step 4 therefore finds the holes on the jar in the stand (camera right above it)
+and side-grasps with the finger axis along them, then step 5 tips towards them. Two ways to find
+them, both run in step 4 and logged on one line (`holes (compare): text: ...; dots: ...; text and
+dots differ by N deg`), pictures `*stand_holes.png` (magenta = text, green = dots) and
+`*stand_holes_dots.png` (the lid top-down: dots found green, other dark spots red):
+
+* **text**: on our jars the holes are on the side of the lid "below" the label's text
+  (`labels.holes_direction`); needs the label read.
+* **dots**: the holes themselves (`spice_task/holes.py`): the picture warped onto the lid plane,
+  small dark round spots (not the label, rim, hub or scratches), the darkest wedge of them. Found
+  on 10 of 12 saved real pictures, every one pointing the right way (within ~20 deg); faint holes
+  are sometimes missed (then the text is used).
+
+`labels.holes` in `config/real.yaml`: `dots` (default: the dots, the text when none found),
+`below_text` (the text only), `compare` (the grasp uses the text, the dots only logged), `off`. Tests: `python3 -m pytest real/test/test_holes.py`.
 
 ## Seeing what the robot sees (RViz)
 

@@ -10,6 +10,7 @@
 #   real/spice.sh full             the whole task, steps 1-8 (--steps 1-4,6-8 skips the shake)
 #   real/spice.sh pourtest         the whole task, but step 5 tips slowly: press a key when it pours (angle ->
 #                                  real/data/pour_tests.csv). After a failure: spice resume 5,6,7,8 --pour-test
+#   real/spice.sh recipe           window: pick spices in order, Start runs the whole task for each
 #   real/spice.sh resume 4,6,7,8   carry on from the last run's saved state
 #   real/spice.sh home             get the arm home safely from where a run stopped (back out, up, home)
 #   real/spice.sh jog              move the arm by hand from the terminal (joints, x/y/z, save poses)
@@ -179,7 +180,22 @@ start_bringup() {
   wait_for "MoveIt" 120 bash -c "ros2 action list | grep -q '^/move_action$'" || exit 1
   wait_for "robot driver" 60 bash -c "ros2 action list | grep -q gripper_cmd" || exit 1
   say "waiting for the arm to finish going home ..."
-  sleep 12
+  # The bringup's go_home.py moves the arm home and then exits. Wait for that, not a fixed time:
+  # a task move sent while it still moves fails ("Cannot push a new trajectory while another is
+  # being executed", MoveIt error -4). First give it a moment to start (MoveIt has to be up).
+  local end=$((SECONDS + 15))
+  until pgrep -f 'helpers/go_home.py' >/dev/null || [ $SECONDS -ge $end ]; do sleep 0.5; done
+  end=$((SECONDS + 180))
+  while pgrep -f 'helpers/go_home.py' >/dev/null; do
+    if [ $SECONDS -ge $end ]; then red "the arm is still going home after 180 s; see $LOG_DIR/robot.log"; exit 1; fi
+    sleep 0.5
+  done
+  if sed 's/\x1b\[[0-9;]*m//g' "$LOG_DIR/robot.log" | grep -q 'go_home.*Home reached'; then
+    green "arm: home"
+  else
+    red "go_home ended without reaching home (see $LOG_DIR/robot.log); the run may start from elsewhere"
+  fi
+  sleep 1
 }
 
 check_camera_usb() {
@@ -219,6 +235,7 @@ case "$cmd" in
   level1)  source_ros; start_bringup; task --steps 1,2,8 "$@" ;;
   full)    source_ros; start_bringup; task "$@" ;;
   pourtest) source_ros; start_bringup; task --steps 1-8 --pour-test "$@" ;;
+  recipe)  source_ros; start_bringup; NO_BRINGUP=1 python3 "$HERE/tools/recipe_gui.py" "$@" ;;
   resume)  source_ros; start_bringup; steps="${1:?give the steps, e.g. real/spice.sh resume 4,6,7,8}"; shift
            task --steps "$steps" --resume "$@" ;;
   home)    source_ros; start_bringup; task --go-home --resume "$@" ;;
